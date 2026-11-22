@@ -5,3 +5,4 @@ export * from "./checks";
 export * from "./guard";
 export * from "./hooks";
 export * from "./tools";
+export * from "./commands";

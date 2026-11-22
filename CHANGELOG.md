@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Phase 8 - Safety and extensibility
+- Safety: persisted audit log and network log (secrets redacted), local-only mode via a guarded fetch (policy refusals are never retried), prompt-injection detection with quarantine banners, credential-path guard, outbound secret redaction, wall-clock limit, permission gate with deny list.
+- Sandbox: Rust AppContainer on Windows (workspace-only writes, no network incl. loopback, no profile or credential access, kill-on-close job) with scrubbed env; env-only fallback elsewhere. Verified with positive-control tests. Background processes (no network sandbox, always gated).
+- `run_command`/`bg_*` tools; MCP client (stdio) and ACP client; external agents' file writes go to the review UI. Tested against real subprocess fixtures (mock MCP server and mock ACP agent; no real Claude Code/Gemini/Codex was available).
 ### Phase 7 - Rules and memory
 - `@forge/context-store`: rule engine with the full precedence chain (user rules < AGENTS.md and imported CLAUDE.md, .cursorrules, .cursor/rules, .windsurfrules, copilot instructions < nested AGENTS.md, nearest last < scoped .forge/rules with always/auto/agent/manual activation), per-rule "why it applies" reasons, a rules linter (contradictions with ESLint, Prettier, editorconfig, dependencies, scripts, and secrets), AGENTS.md generation from the repo, memories as Markdown files (project and personal), correction detection, docs indexing with BM25 retrieval, session transcripts, fresh-thread suggestion.
 - Runtime: compaction near a threshold (default 80%) keeping rules, plan, file list and open decisions, PreCompact/PostCompact hooks, summaries folded across compactions; token meter calibrated to provider-reported usage; sub-agents (`delegate`) with a fresh read-only context that return only a report.

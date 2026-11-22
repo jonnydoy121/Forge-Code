@@ -50,6 +50,15 @@ fn kill_tree(pid: u32) {
 }
 
 pub fn run_shell(command: &str, cwd: &Path, timeout: Duration, env: &[(String, String)], max_output: usize) -> Result<ExecResult, String> {
+    run_inner(command, cwd, timeout, env, max_output, false)
+}
+
+/// Like `run_shell`, but the child sees ONLY `env` (nothing inherited): used for sandboxed agent commands.
+pub fn run_shell_env_only(command: &str, cwd: &Path, timeout: Duration, env: &[(String, String)], max_output: usize) -> Result<ExecResult, String> {
+    run_inner(command, cwd, timeout, env, max_output, true)
+}
+
+fn run_inner(command: &str, cwd: &Path, timeout: Duration, env: &[(String, String)], max_output: usize, clear_env: bool) -> Result<ExecResult, String> {
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.args(["/D", "/S", "/C"]);
@@ -67,6 +76,9 @@ pub fn run_shell(command: &str, cwd: &Path, timeout: Duration, env: &[(String, S
         c
     };
     cmd.current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if clear_env {
+        cmd.env_clear();
+    }
     for (k, v) in env {
         cmd.env(k, v);
     }

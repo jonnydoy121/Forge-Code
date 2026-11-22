@@ -17,6 +17,15 @@
       "path": "packages/plans"
     },
     {
+      "path": "packages/acp"
+    },
+    {
+      "path": "packages/mcp"
+    },
+    {
+      "path": "packages/rpc"
+    },
+    {
       "path": "packages/agent-runtime"
     },
     {

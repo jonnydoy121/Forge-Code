@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Mode } from "@forge/protocol";
 import type { Message } from "@forge/protocol";
 import type { Runtime, MeterEntry, ContextSection } from "@forge/agent-runtime";
-import { createSession, type AuditEntry } from "../lib/agentSession";
+import { createSession } from "../lib/agentSession";
 import { fsApi, indexBackend } from "../lib/ipc";
 import { attachmentKey, attachmentLabel, resolveAttachment, type Attachment } from "../lib/attachments";
 import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord } from "@forge/context-store";
@@ -19,10 +19,14 @@ import { git, type ReportEvent } from "../lib/workspace";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
 
-/** Replace the last assistant item (the streaming placeholder) with `next`, keeping any notices added since. */
+/**
+ * Put `next` where the streaming placeholder is. An empty placeholder is replaced; one that already holds narration
+ * ("Looking at the file...") is kept, and `next` goes after it, so the agent's words are never lost.
+ */
 function replaceLastAssistant(items: Item[], next: Item[]): Item[] {
   for (let k = items.length - 1; k >= 0; k--) {
-    if (items[k]!.kind === "assistant") return [...items.slice(0, k), ...next, ...items.slice(k + 1)];
+    const it = items[k]!;
+    if (it.kind === "assistant") return it.text.trim() === "" ? [...items.slice(0, k), ...next, ...items.slice(k + 1)] : [...items.slice(0, k + 1), ...next, ...items.slice(k + 1)];
   }
   return [...items, ...next];
 }
@@ -38,9 +42,10 @@ export interface RunOutcome {
 type Item =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; name: string; ok: boolean; output: string }
+  | { kind: "tool"; name: string; ok: boolean; output: string; id?: string }
   | { kind: "notice"; text: string }
   | { kind: "report"; report: VerificationReport; source: string }
+  | { kind: "injection"; tool: string; findings: { pattern: string; excerpt: string }[] }
   | { kind: "compaction"; summary: string; removed: number; before: number; after: number };
 
 interface Props {
@@ -84,8 +89,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const planRef = useRef<string | null>(null);
   const pendingHistory = useRef<Message[] | null>(null);
   const [cost, setCost] = useState(0);
-  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [auditTick, setAuditTick] = useState(0);
+  const [auditFilter, setAuditFilter] = useState<"all" | "network" | "command" | "file" | "blocked">("all");
   const [showAudit, setShowAudit] = useState(false);
+  const [external, setExternal] = useState<string | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
   const [suggest, setSuggest] = useState<string | null>(null);
   const runtime = useRef<Runtime | null>(null);
@@ -109,6 +116,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     if (services) void services.sessions.latest().then((r) => setResumable(r && r.messages.length > 0 ? r : null)).catch(() => {});
   }, [services]);
 
+  useEffect(() => {
+    if (services) services.audit.onEntry(() => setAuditTick((t) => t + 1));
+  }, [services]);
+
   const seenReport = useRef(0);
   useEffect(() => {
     if (externalReport && externalReport.seq !== seenReport.current) {
@@ -128,6 +139,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     const prompt = (override?.prompt ?? input).trim();
     const runMode = override?.mode ?? mode;
     if (!prompt || busy || !root || !services) return outcome;
+    if (!override && external) return runExternal(prompt);
 
     // Only the explicit Build action or a plain, unqualified "go" starts execution; ambiguous wording never does.
     if (!override && activePlanSlug) {
@@ -170,7 +182,6 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           root,
           settings,
           services,
-          audit: (e) => setAudit((a) => [...a, e]),
           onHook: (event, output) => onHook(event, output),
           sections: async () => {
             const out: ContextSection[] = [];
@@ -258,6 +269,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           const seq = Date.now() + Math.random(); // already shown inline; mark it seen so the effect below does not add it twice
           seenReport.current = seq;
           onReport({ report, source: "agent", seq });
+        } else if (ev.type === "injection") {
+          setItems((i) => replaceLastAssistant(i, [{ kind: "injection", tool: ev.tool, findings: ev.findings }, { kind: "assistant", text: "" }]));
         } else if (ev.type === "compaction") {
           setItems((i) => replaceLastAssistant(i, [{ kind: "compaction", summary: ev.summary, removed: ev.removedMessages, before: ev.tokensBefore, after: ev.tokensAfter }, { kind: "assistant", text: "" }]));
         } else if (ev.type === "hook") {
@@ -281,6 +294,49 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     }
     return outcome;
   }
+  /** One prompt through an external ACP agent. Its file edits arrive as pending changes in the review UI. */
+  async function runExternal(prompt: string): Promise<RunOutcome> {
+    const outcome: RunOutcome = {};
+    if (!services || !external) return outcome;
+    setInput("");
+    setBusy(true);
+    setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "assistant", text: "" }]);
+    abort.current = new AbortController();
+    try {
+      const r = await services.acp.prompt(
+        external,
+        prompt,
+        (u) => {
+          if (u.kind === "message") {
+            setItems((i) => {
+              for (let k = i.length - 1; k >= 0; k--) {
+                const it = i[k]!;
+                if (it.kind === "assistant") return [...i.slice(0, k), { kind: "assistant", text: it.text + u.text }, ...i.slice(k + 1)];
+              }
+              return i;
+            });
+          } else if (u.kind === "tool_call") {
+            setItems((i) => replaceLastAssistant(i, [{ kind: "tool", id: u.id, name: `${external}: ${u.title}`, ok: u.status !== "failed", output: u.status }, { kind: "assistant", text: "" }]));
+          } else if (u.kind === "tool_call_update") {
+            setItems((i) => i.map((it) => (it.kind === "tool" && it.id === u.id ? { ...it, ok: u.status !== "failed", output: [u.status, u.text].filter(Boolean).join(": ") } : it)));
+          } else if (u.kind === "plan") {
+            setItems((i) => replaceLastAssistant(i, [{ kind: "notice", text: `${external} plan: ${u.entries.map((e) => `${e.status === "completed" ? "[x]" : "[ ]"} ${e.content}`).join("; ")}` }, { kind: "assistant", text: "" }]));
+          }
+        },
+        abort.current.signal,
+      );
+      setItems((i) => [...i, { kind: "notice", text: `${external} finished (${r.stopReason}). Its edits are in the review pane.` }]);
+    } catch (e) {
+      outcome.error = e instanceof Error ? e.message : String(e);
+      setItems((i) => [...i, { kind: "notice", text: `Error: ${outcome.error}` }]);
+    } finally {
+      setItems((i) => i.filter((x) => !(x.kind === "assistant" && x.text === "")));
+      setBusy(false);
+      onFilesChanged();
+    }
+    return outcome;
+  }
+
   const sendRef = useRef(send);
   sendRef.current = send;
   useEffect(() => {
@@ -304,11 +360,21 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           aria-label="Mode"
           data-testid="mode-select"
           className="rounded bg-[var(--hover)] px-1"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as Mode)}
+          value={external ? `ext:${external}` : mode}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v.startsWith("ext:")) setExternal(v.slice(4));
+            else {
+              setExternal(null);
+              setMode(v as Mode);
+            }
+          }}
         >
           {MODES.map((m) => (
-            <option key={m}>{m}</option>
+            <option key={m} value={m}>{m}</option>
+          ))}
+          {(services?.acp.agents ?? []).map((a) => (
+            <option key={a.name} value={`ext:${a.name}`}>external: {a.name}</option>
           ))}
         </select>
         <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={offMachine ? "Prompts and attached code are sent to a remote server" : "Local model: nothing leaves this machine"}>
@@ -344,6 +410,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           <label className="block">Your rules (every project, lowest precedence)
             <textarea data-testid="user-rules" className="mt-1 h-16 w-full rounded bg-[var(--hover)] p-1" value={settings.userRules} onChange={(e) => update({ userRules: e.target.value })} />
           </label>
+          <label className="block"><input type="checkbox" data-testid="local-only" checked={settings.localOnly} onChange={(e) => update({ localOnly: e.target.checked })} /> Local-only mode: block every request that would leave this machine</label>
+          <label className="block"><input type="checkbox" data-testid="sandbox-on" checked={settings.sandbox} onChange={(e) => update({ sandbox: e.target.checked })} /> Run agent commands in the OS sandbox (workspace only, no network)</label>
+          <label className="block"><input type="checkbox" checked={settings.toolchainRead} onChange={(e) => update({ toolchainRead: e.target.checked })} /> Let the sandbox read tool folders on PATH (adds read-only access for node, git, ...)</label>
+          <label className="block">Max minutes per run <input type="number" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /></label>
           <p className="text-[var(--muted)]">Key is stored in this app's local storage (OS keychain arrives in Phase 8).</p>
         </div>
       )}
@@ -371,7 +441,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             }}
             draftCommitMessage={async (diff) => {
               try {
-                return await completeOnce(settings, `Write a concise git commit message (imperative mood, max 72 char subject, optional short body) for this change. Reply with the message only.
+                return await completeOnce(settings, services, `Write a concise git commit message (imperative mood, max 72 char subject, optional short body) for this change. Reply with the message only.
 
 ${diff}`);
               } catch {
@@ -381,17 +451,42 @@ ${diff}`);
           />
         </div>
       ) : showAudit ? (
-        <ul className="flex-1 overflow-auto p-2 font-mono text-xs" data-testid="audit-log">
-          {audit.length === 0 && <li className="text-[var(--muted)]">No activity yet.</li>}
-          {audit.map((a, i) => (
-            <li key={i}>{new Date(a.at).toLocaleTimeString()} {a.kind} {a.name} {a.detail}</li>
-          ))}
-        </ul>
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="audit-view">
+          {(() => {
+            const all = services?.audit.list() ?? [];
+            const net = services?.audit.network();
+            const shown = all.filter((e) => (auditFilter === "all" ? true : auditFilter === "network" ? e.kind === "network" || e.kind === "model" : auditFilter === "command" ? e.kind === "command" || e.kind === "sandbox" : auditFilter === "file" ? e.kind === "file" : !!e.blocked));
+            void auditTick;
+            return (
+              <>
+                <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-2 py-1 text-xs">
+                  {(["all", "network", "command", "file", "blocked"] as const).map((f) => (
+                    <button key={f} data-testid={`audit-${f}`} className={auditFilter === f ? "underline" : "text-[var(--muted)]"} onClick={() => setAuditFilter(f)}>{f}</button>
+                  ))}
+                  <span className="ml-auto" data-testid="privacy-summary">
+                    {net ? `${net.all.length} network request${net.all.length === 1 ? "" : "s"}, ${net.remote.length} left this machine, ${net.blocked.length} blocked` : ""}
+                  </span>
+                </div>
+                <ul className="flex-1 overflow-auto p-2 font-mono text-xs" data-testid="audit-log">
+                  {shown.length === 0 && <li className="text-[var(--muted)]">No activity yet.</li>}
+                  {shown.map((a, i) => (
+                    <li key={i} className={a.blocked ? "text-red-400" : ""}>{new Date(a.at).toLocaleTimeString()} {a.kind}{a.local === false ? " REMOTE" : a.local ? " local" : ""}{a.blocked ? " BLOCKED" : ""} {a.name} {a.detail}</li>
+                  ))}
+                </ul>
+              </>
+            );
+          })()}
+        </div>
       ) : (
         <div className="flex-1 space-y-2 overflow-auto p-3 text-sm" data-testid="messages">
           {items.length === 0 && <p className="text-[var(--muted)]">Ask a question about this codebase. Mode "ask" is read-only.</p>}
           {items.map((it, i) =>
-            it.kind === "compaction" ? (
+            it.kind === "injection" ? (
+              <div key={i} className="rounded border border-red-700 bg-red-900/20 px-2 py-1 text-xs" role="alert" data-testid="injection-warning">
+                Security warning: content returned by <strong>{it.tool}</strong> contains instructions aimed at an AI ({it.findings.map((f) => f.pattern).join("; ")}). Forge treated it as data and did not follow it.
+                <div className="mt-1 text-[var(--muted)]">“{it.findings[0]?.excerpt}”</div>
+              </div>
+            ) : it.kind === "compaction" ? (
               <details key={i} className="rounded border border-blue-700 bg-blue-900/20 px-2 py-1 text-xs" data-testid="compaction-notice">
                 <summary>Context compacted: {it.removed} older messages summarised ({it.before.toLocaleString()} to {it.after.toLocaleString()} tokens). Rules, plan and file list were kept.</summary>
                 <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{it.summary}</pre>

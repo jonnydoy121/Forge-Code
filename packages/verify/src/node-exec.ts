@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { scrubEnv } from "@forge/safety";
 import type { Exec, ExecResult } from "./exec";
 
 /** Exec over Node child_process (tests and Node-hosted workers). */
@@ -6,7 +7,7 @@ export const nodeExec: Exec = {
   run(command, opts) {
     return new Promise<ExecResult>((resolve) => {
       const started = Date.now();
-      const child = spawn(command, { cwd: opts.cwd, shell: true, env: { ...process.env, ...opts.env }, windowsHide: true });
+      const child = spawn(command, { cwd: opts.cwd, shell: true, env: { ...(opts.sandbox ? scrubEnv(process.env) : process.env), ...opts.env }, windowsHide: true });
       let stdout = "";
       let stderr = "";
       let timedOut = false;
@@ -19,7 +20,7 @@ export const nodeExec: Exec = {
       }, opts.timeoutMs);
       child.on("close", (code) => {
         clearTimeout(timer);
-        resolve({ code, stdout, stderr, timedOut, millis: Date.now() - started });
+        resolve({ code, stdout, stderr, timedOut, millis: Date.now() - started, sandbox: opts.sandbox ? { mode: "env-only" } : undefined });
       });
       child.on("error", (e) => {
         clearTimeout(timer);

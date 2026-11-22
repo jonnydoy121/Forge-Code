@@ -11,7 +11,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "rules" | "memory" | "docs";
+type Tab = "rules" | "memory" | "docs" | "connections";
 
 export function ContextPane({ services, version, activeFile, onOpenFile, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("rules");
@@ -19,9 +19,9 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
     <div className="flex h-full min-h-0 flex-col" data-testid="context-pane" aria-label="Context">
       <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-sm" role="tablist">
         <strong>Context</strong>
-        {(["rules", "memory", "docs"] as Tab[]).map((t) => (
+        {(["rules", "memory", "docs", "connections"] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} data-testid={`ctx-tab-${t}`} className={tab === t ? "underline" : "text-[var(--muted)]"} onClick={() => setTab(t)}>
-            {t === "rules" ? "Rules" : t === "memory" ? "Memories" : "Docs"}
+            {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "docs" ? "Docs" : "Connections"}
           </button>
         ))}
         <button className="ml-auto underline" onClick={onClose}>Close</button>
@@ -30,6 +30,7 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
         {tab === "rules" && <RulesTab services={services} version={version} activeFile={activeFile} onOpenFile={onOpenFile} />}
         {tab === "memory" && <MemoryTab services={services} version={version} />}
         {tab === "docs" && <DocsTab services={services} version={version} />}
+        {tab === "connections" && <ConnectionsTab services={services} />}
       </div>
     </div>
   );
@@ -187,6 +188,54 @@ function DocsTab({ services, version }: { services: WorkspaceServices; version: 
         ))}
         {list.length === 0 && <li className="text-[var(--muted)]">No docs indexed.</li>}
       </ul>
+    </div>
+  );
+}
+
+function ConnectionsTab({ services }: { services: WorkspaceServices }) {
+  const [, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const status = services.mcp.status();
+  return (
+    <div className="space-y-4">
+      <section>
+        <h3 className="mb-1 font-semibold">MCP servers</h3>
+        <p className="mb-2 text-[var(--muted)]">External tool servers (databases, browsers, issue trackers) configured in <code>.forge/mcp.json</code>. Their tools ask for approval before use, and their results are treated as untrusted data. Starting a server runs a program on your machine, so you are asked first.</p>
+        {services.mcp.errors.map((e, i) => <p key={i} className="text-red-400">{e}</p>)}
+        <ul className="mb-2 space-y-1" data-testid="mcp-list">
+          {services.mcp.configured.map((c) => {
+            const st = status.find((x) => x.name === c.name);
+            return (
+              <li key={c.name} className="rounded border border-[var(--border)] p-2" data-testid="mcp-server">
+                <strong>{c.name}</strong> <code className="text-xs text-[var(--muted)]">{[c.command, ...c.args].join(" ")}</code>
+                {st && <div className={st.state === "ready" ? "text-green-400" : "text-red-400"} data-testid="mcp-state">{st.state}{st.error ? `: ${st.error}` : ` · ${st.tools.length} tools`}</div>}
+              </li>
+            );
+          })}
+          {services.mcp.configured.length === 0 && <li className="text-[var(--muted)]">None configured.</li>}
+        </ul>
+        {services.mcp.configured.length > 0 && (
+          <div className="flex gap-2">
+            <button className="rounded bg-[var(--hover)] px-2 py-1" data-testid="mcp-connect" disabled={busy} onClick={() => { setBusy(true); services.mcp.connect().then((t) => setMsg(`Connected: ${t.length} tools available to the agent in new sessions.`)).catch((e) => setMsg(`Failed: ${e}`)).finally(() => { setBusy(false); setTick((x) => x + 1); }); }}>Connect</button>
+            <button className="rounded bg-[var(--hover)] px-2 py-1" onClick={() => { services.mcp.disconnect(); setTick((x) => x + 1); }}>Disconnect</button>
+          </div>
+        )}
+        {msg && <div role="status" data-testid="mcp-msg">{msg}</div>}
+      </section>
+      <section>
+        <h3 className="mb-1 font-semibold">External agents (ACP)</h3>
+        <p className="mb-2 text-[var(--muted)]">Agents such as Claude Code, Gemini CLI or Codex that speak the Agent Client Protocol, configured in <code>.forge/acp.json</code>. Pick one from the agent panel's mode menu: its edits come through Forge's review pane like any other change.</p>
+        {services.acp.errors.map((e, i) => <p key={i} className="text-red-400">{e}</p>)}
+        <ul className="space-y-1" data-testid="acp-list">
+          {services.acp.agents.map((a) => (
+            <li key={a.name} className="rounded border border-[var(--border)] p-2" data-testid="acp-agent">
+              <strong>{a.name}</strong> <code className="text-xs text-[var(--muted)]">{[a.command, ...a.args].join(" ")}</code>
+            </li>
+          ))}
+          {services.acp.agents.length === 0 && <li className="text-[var(--muted)]">None configured.</li>}
+        </ul>
+      </section>
     </div>
   );
 }

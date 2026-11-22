@@ -7,6 +7,7 @@
   "dependencies": {
     "@forge/protocol": "*",
     "@forge/review": "*",
-    "@forge/tool-host": "*"
+    "@forge/tool-host": "*",
+    "@forge/safety": "*"
   }
 }

@@ -59,7 +59,8 @@ export class Gateway implements ModelGateway {
         return;
       } catch (e) {
         // Retry only if nothing was streamed yet and the failure is transient.
-        const transient = e instanceof HttpError ? e.status === 429 || e.status >= 500 : !(e instanceof Error && e.name === "AbortError");
+        const refused = typeof e === "object" && e !== null && (e as { retryable?: boolean }).retryable === false;
+        const transient = !refused && (e instanceof HttpError ? e.status === 429 || e.status >= 500 : !(e instanceof Error && e.name === "AbortError"));
         if (started || !transient || attempt >= this.retries) throw e;
         await this.sleep(Math.min(8000, 500 * 2 ** attempt));
       }

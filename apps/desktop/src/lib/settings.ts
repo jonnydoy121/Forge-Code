@@ -17,6 +17,14 @@ export interface AgentSettings {
   budgetTokens: number;
   /** compact older turns when the context reaches this fraction of the budget */
   compactionThreshold: number;
+  /** block every request that would leave this machine (models, docs, web pages) */
+  localOnly: boolean;
+  /** run agent commands in the OS sandbox: workspace only, no network, scrubbed environment */
+  sandbox: boolean;
+  /** let the sandbox read tool directories on PATH (node, git, ...) so project tools run */
+  toolchainRead: boolean;
+  /** wall-clock seconds for one agent run */
+  maxSeconds: number;
 }
 
 export const DEFAULT_MODELS: Record<AgentSettings["provider"], string> = {
@@ -37,6 +45,10 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   autoMemories: false,
   budgetTokens: 100_000,
   compactionThreshold: 0.8,
+  localOnly: false,
+  sandbox: true,
+  toolchainRead: true,
+  maxSeconds: 1800,
 };
 
 const KEY = "forge.settings.v1";

@@ -3,22 +3,28 @@ import { PendingChanges, type ReviewMode } from "@forge/review";
 import { createEditTools, type EditSink, type FsBackend, type RegisteredTool } from "@forge/tool-host";
 import {
   HookRunner,
+  createCommandTools,
   createVerifyTools,
   detectWeakening,
   loadCommands,
   parseHooksConfig,
   runChecks,
   withCommandsSection,
+  type BackgroundRunner,
   type Exec,
   type ProjectCommands,
   type StructuredError,
   type VerificationReport,
 } from "@forge/verify";
-import { createPermissionGate, type AskRequest, type Remember } from "@forge/safety";
+import { AuditLog, createPermissionGate, denyReason, guardFetch, type AskRequest, type Remember } from "@forge/safety";
+import { McpManager, parseMcpConfig, type McpLauncher, type McpServerConfig, type McpServerStatus } from "@forge/mcp";
+import { AcpClient, forgeAcpHandlers, parseAcpConfig, type AcpAgentConfig, type AcpUpdate } from "@forge/acp";
+import type { LineTransport } from "@forge/rpc";
+import { listen } from "@tauri-apps/api/event";
 import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/plans";
 import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts } from "@forge/context-store";
 import { loadSettings } from "./settings";
-import { fetchText } from "./http";
+import { fetchText as rawFetchText, pickFetch } from "./http";
 import type { Runtime, VerifyDeps } from "@forge/agent-runtime";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexBackend } from "./ipc";
@@ -38,6 +44,15 @@ export const git = (root: string, args: string[]) => invoke<GitResult>("git_run"
 
 export const tauriExec: Exec = {
   run: async (command, o) => {
+    if (o.sandbox) {
+      const r = await invoke<{ code: number | null; stdout: string; stderr: string; timed_out: boolean; millis: number; mode: "appcontainer" | "env-only"; granted: string[]; warnings: string[] }>("sandbox_run", {
+        cwd: o.cwd,
+        command,
+        timeoutMs: o.timeoutMs,
+        toolchainRead: o.toolchainRead ?? true,
+      });
+      return { code: r.code, stdout: r.stdout, stderr: r.stderr, timedOut: r.timed_out, millis: r.millis, sandbox: { mode: r.mode, granted: r.granted, warnings: r.warnings } };
+    }
     const r = await invoke<{ code: number | null; stdout: string; stderr: string; timed_out: boolean; millis: number }>("run_command", {
       cwd: o.cwd,
       command,
@@ -47,6 +62,36 @@ export const tauriExec: Exec = {
     return { code: r.code, stdout: r.stdout, stderr: r.stderr, timedOut: r.timed_out, millis: r.millis };
   },
 };
+
+export const tauriBg: BackgroundRunner = {
+  start: (command, cwd) => invoke<number>("bg_start", { cwd, command }),
+  read: async (id, lines) => {
+    const r = await invoke<{ running: boolean; exit_code: number | null; output: string }>("bg_read", { id, lines });
+    return { running: r.running, exitCode: r.exit_code, output: r.output };
+  },
+  stop: (id) => invoke<void>("bg_stop", { id }),
+  list: () => invoke<{ id: number; command: string; running: boolean }[]>("bg_list"),
+};
+
+/** MCP servers and ACP agents are line-oriented subprocesses: bridge them through the Rust process manager. */
+export async function launchLineProcess(command: string, args: string[], cwd: string, env: Record<string, string>): Promise<LineTransport & { id: number }> {
+  let onLine: (l: string) => void = () => {};
+  let onClose: () => void = () => {};
+  const unlisten: (() => void)[] = [];
+  const id = await invoke<number>("proc_start", { command, args, cwd, env: Object.entries(env) });
+  unlisten.push(await listen<{ id: number; line: string }>("proc-line", (e) => e.payload.id === id && onLine(e.payload.line)));
+  unlisten.push(await listen<{ id: number }>("proc-exit", (e) => e.payload.id === id && onClose()));
+  return {
+    id,
+    send: (line) => void invoke("proc_send", { id, line }).catch(() => onClose()),
+    onLine: (h) => (onLine = h),
+    onClose: (h) => (onClose = h),
+    close: () => {
+      unlisten.forEach((u) => u());
+      void invoke("proc_stop", { id });
+    },
+  };
+}
 
 export interface ReportEvent { report: VerificationReport; source: "agent" | "accepted-changes" | "manual"; seq: number }
 
@@ -83,6 +128,19 @@ export interface WorkspaceServices {
   lintAll(): Promise<LintWarning[]>;
   /** Draft an AGENTS.md from the repo and propose it as a reviewable change. */
   proposeGeneratedRules(): Promise<void>;
+  /** Every tool call, command, file write and model request of this session (persisted, secrets redacted). */
+  audit: AuditLog;
+  /** fetch for models, docs and web pages: logged, and refuses non-local hosts in local-only mode */
+  fetch: ReturnType<typeof guardFetch>;
+  commandTools(settings: { sandbox: boolean; toolchainRead: boolean }): RegisteredTool[];
+  mcp: { configured: McpServerConfig[]; status(): McpServerStatus[]; connect(): Promise<RegisteredTool[]>; disconnect(): void; tools(): RegisteredTool[]; errors: string[] };
+  acp: {
+    agents: AcpAgentConfig[];
+    errors: string[];
+    /** Run one prompt through an external agent; its file edits land in the review UI. */
+    prompt(agent: string, text: string, onUpdate: (u: AcpUpdate) => void, signal?: AbortSignal): Promise<{ stopReason: string }>;
+    stop(agent: string): void;
+  };
 }
 
 const SESSION_KEY = "forge.session.v1";
@@ -158,6 +216,7 @@ export async function createWorkspaceServices(opts: {
       diagnostics: opts.diagnostics,
     });
 
+  const auditRef: { current: AuditLog | null } = { current: null };
   let verifyTimer: ReturnType<typeof setTimeout> | undefined;
   const pending = new PendingChanges({
     fs: diskFs,
@@ -169,6 +228,7 @@ export async function createWorkspaceServices(opts: {
     onChange: opts.onChange,
     onApplied: async (path, origin) => {
       const r = rel(path);
+      auditRef.current?.record({ kind: "file", name: `write ${r}`, detail: origin === "agent-auto" ? "applied automatically (checkpointed)" : "accepted by the developer" });
       sessionTouched.set(r, sessionTouched.get(r) ?? false);
       if (origin === "developer") touchedAfterAccept.add(r);
       const out = await hooks.run("PostEdit", { files: [r] });
@@ -185,10 +245,11 @@ export async function createWorkspaceServices(opts: {
     },
   });
 
+  let fetchTextLate: (u: string) => Promise<string> = rawFetchText;
   const home = await invoke<string | null>("home_dir").catch(() => null);
   const rules = new RuleEngine(diskFs, root, () => loadSettings().userRules);
   const memories = new MemoryStore(diskFs, { project: `${root}/.forge/memory`, user: home ? `${norm(home)}/.forge/memory` : undefined }, opts.onChange);
-  const docs = new DocsStore(diskFs, `${root}/.forge/docs`, fetchText, opts.onChange);
+  const docs = new DocsStore(diskFs, `${root}/.forge/docs`, (u) => fetchTextLate(u), opts.onChange);
   const sessions = new SessionStore(diskFs, `${root}/.forge/sessions`);
   const uniqueFiles = async (pattern: string, glob?: string) => new Set((await indexBackend.grep(pattern, glob, 5000).catch(() => [])).map((h) => h.file)).size;
   const facts = async () =>
@@ -200,6 +261,20 @@ export async function createWorkspaceServices(opts: {
 
   const plans = new PlanStore(diskFs, root, opts.onChange);
   const planGuard = new PlanGuard({ store: plans, askAddFile: opts.askAddFile, onBlocked: opts.onBlocked }, root);
+
+  const audit = new AuditLog(diskFs, `${root}/.forge/audit/${sessionId}.jsonl`);
+  void audit.load();
+  const guarded = guardFetch(
+    async (url, init) => (await pickFetch())(url, init),
+    { localOnly: () => loadSettings().localOnly, audit },
+  );
+  const fetchText = async (url: string) => {
+    const r = await guarded(url, { method: "GET", headers: { accept: "text/html,text/plain,text/markdown" } });
+    if (!r.ok) throw new Error(`HTTP ${r.status} fetching ${url}`);
+    return (await r.text()).slice(0, 2_000_000);
+  };
+  fetchTextLate = fetchText;
+  auditRef.current = audit;
 
   const sink: EditSink = {
     authorize: (path) => planGuard.authorize(path),
@@ -215,6 +290,7 @@ export async function createWorkspaceServices(opts: {
 
   const gate = createPermissionGate({
     ask: opts.ask,
+    audit: (e) => audit.record({ kind: "permission", name: e.tool, detail: `${e.decision}${e.danger ? " (dangerous: " + e.danger + ")" : ""}: ${e.summary}`, blocked: e.decision === "deny" }),
     load: async () => {
       try {
         const t = await diskFs.read(`${root}/.forge/permissions.json`);
@@ -231,6 +307,88 @@ export async function createWorkspaceServices(opts: {
     maxAttempts: 5,
     root,
     run: (touched, phase, attempt) => verifyOpts(phase, touched, attempt),
+  };
+
+  const mcpCfg = parseMcpConfig(await diskFs.read(`${root}/.forge/mcp.json`));
+  let mcpTools: RegisteredTool[] = [];
+  const mcpLauncher: McpLauncher = { launch: async (cfg) => launchLineProcess(cfg.command, cfg.args, root, cfg.env) };
+  const mcpManager = new McpManager(mcpLauncher);
+  const mcpHandle = {
+    configured: mcpCfg.servers,
+    errors: mcpCfg.errors,
+    status: () => mcpManager.status,
+    tools: () => mcpTools,
+    connect: async () => {
+      // Starting an external process is an execute-class action: the developer approves each server.
+      const approved: McpServerConfig[] = [];
+      for (const c of mcpCfg.servers) {
+        const summary = `Start MCP server "${c.name}": ${[c.command, ...c.args].join(" ")}`;
+        const a = await opts.ask({ tool: "mcp-server", cls: "execute", summary });
+        audit.record({ kind: "external", name: `mcp start ${c.name}`, detail: a, blocked: a === "deny" });
+        if (a !== "deny") approved.push(c);
+      }
+      mcpManager.close();
+      mcpTools = await mcpManager.start(approved);
+      return mcpTools;
+    },
+    disconnect: () => {
+      mcpManager.close();
+      mcpTools = [];
+    },
+  };
+
+  const acpCfg = parseAcpConfig(await diskFs.read(`${root}/.forge/acp.json`));
+  const acpClients = new Map<string, { client: AcpClient; session: string; close: () => void; onUpdate: { current: (u: AcpUpdate) => void } }>();
+  const acpHandle = {
+    agents: acpCfg.agents,
+    errors: acpCfg.errors,
+    prompt: async (name: string, text: string, onUpdate: (u: AcpUpdate) => void, signal?: AbortSignal) => {
+      const cfg = acpCfg.agents.find((a) => a.name === name);
+      if (!cfg) throw new Error(`no external agent named ${name}`);
+      let entry = acpClients.get(name);
+      if (!entry) {
+        const a = await opts.ask({ tool: "external-agent", cls: "execute", summary: `Start external agent "${name}": ${[cfg.command, ...cfg.args].join(" ")}. Its file edits will go through review; it can ask to run commands.` });
+        audit.record({ kind: "external", name: `acp start ${name}`, detail: a, blocked: a === "deny" });
+        if (a === "deny") throw new Error("You declined to start the external agent.");
+        const transport = await launchLineProcess(cfg.command, cfg.args, root, cfg.env);
+        const updateRef = { current: onUpdate };
+        const client = new AcpClient(
+          transport,
+          forgeAcpHandlers({
+            root,
+            agentName: name,
+            read: async (p) => {
+              const e = pending.effective(p);
+              return e !== undefined ? e : diskFs.read(p);
+            },
+            propose: async (path, content, reason) => {
+              const o = await pending.propose(path, content, reason);
+              return { status: o.status };
+            },
+            ask: (r) => opts.ask({ tool: "external-agent", cls: "execute", summary: r.summary, danger: r.danger }),
+            denyReason,
+            onUpdate: (u) => updateRef.current(u),
+            audit: (e) => audit.record({ kind: "external", name: e.name, detail: e.detail, blocked: e.blocked }),
+          }),
+        );
+        await client.initialize();
+        const session = await client.newSession(root);
+        entry = { client, session, close: () => transport.close(), onUpdate: updateRef };
+        acpClients.set(name, entry);
+      }
+      entry.onUpdate.current = onUpdate;
+      const onAbort = () => entry!.client.cancel(entry!.session);
+      signal?.addEventListener("abort", onAbort);
+      try {
+        return await entry.client.prompt(entry.session, text);
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+      }
+    },
+    stop: (name: string) => {
+      acpClients.get(name)?.close();
+      acpClients.delete(name);
+    },
   };
 
   return {
@@ -286,6 +444,19 @@ export async function createWorkspaceServices(opts: {
     sessions,
     contextTools: createContextTools({ rules, docs, memories, autoMemories: () => loadSettings().autoMemories, onMemoryCreated: opts.onMemoryCreated }),
     facts,
+    audit,
+    fetch: guarded,
+    commandTools: (st) =>
+      createCommandTools({
+        exec: tauriExec,
+        bg: tauriBg,
+        cwd: root,
+        sandbox: () => st.sandbox,
+        toolchainRead: () => st.toolchainRead,
+        audit: (e) => audit.record({ kind: e.kind, name: e.name, detail: e.detail, blocked: e.blocked }),
+      }),
+    mcp: mcpHandle,
+    acp: acpHandle,
     lintAll: async () => lintRules(await rules.load(), await facts()),
     proposeGeneratedRules: async () => {
       const draft = generateAgentsMd(await facts(), await commands(), root.split("/").pop());

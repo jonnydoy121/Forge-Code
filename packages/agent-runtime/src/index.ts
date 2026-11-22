@@ -11,6 +11,7 @@ import {
   type ToolHost,
   type ToolResult,
 } from "@forge/protocol";
+import { detectInjection, quarantine } from "@forge/safety";
 import { feedbackMessage, finalFailureMessage, unverifiedReport, type HookRunner, type TouchedFile, type VerificationReport } from "@forge/verify";
 import { assembleContext, estimateTokens, TokenCalibrator, type AssembledContext, type ContextSection, type MeterEntry } from "./context";
 import { SUMMARY_MARKER, compactionCut, filesTouchedIn, summarizeWith } from "./compaction";
@@ -29,6 +30,8 @@ Rules:
 export interface RuntimeLimits {
   maxSteps: number;
   maxCostUsd: number;
+  /** wall-clock seconds for one run */
+  maxSeconds: number;
 }
 
 export interface VerifyDeps {
@@ -140,7 +143,8 @@ ${summary}` });
 
   private async *runInner(req: { mode: Mode; prompt: string; signal?: AbortSignal }): AsyncIterable<AgentEvent> {
     const { deps } = this;
-    const limits: RuntimeLimits = { maxSteps: 12, maxCostUsd: 2, ...deps.limits };
+    const limits: RuntimeLimits = { maxSteps: 12, maxCostUsd: 2, maxSeconds: 1800, ...deps.limits };
+    const startedAt = Date.now();
     const maxAttempts = deps.verify?.maxAttempts ?? 5;
     this.signal = req.signal;
     this.history.push({ role: "user", content: req.prompt });
@@ -181,6 +185,7 @@ ${summary}` });
     for (let step = 0; step < limits.maxSteps; step++) {
       if (this.signal?.aborted) return void (yield { type: "limit", reason: "aborted" });
       if (this.costUsd >= limits.maxCostUsd) return void (yield { type: "limit", reason: "cost" });
+      if (Date.now() - startedAt > limits.maxSeconds * 1000) return void (yield { type: "limit", reason: "time" });
 
       const specs = finalReport ? [] : deps.tools.listTools(req.mode);
       const budget = deps.budgetTokens ?? 100_000;
@@ -215,7 +220,8 @@ ${summary}` });
       for await (const ev of deps.gateway.stream({
         provider: deps.provider,
         model: deps.model,
-        messages: [{ role: "system", content: ctx.system }, ...ctx.history],
+        // Secrets never leave the machine, whatever their source: redact everything sent to the model.
+        messages: ([{ role: "system", content: ctx.system }, ...ctx.history] as Message[]).map((m) => ({ ...m, content: redactSecrets(m.content) })),
         tools: specs,
         signal: this.signal,
       })) {
@@ -257,6 +263,12 @@ ${summary}` });
       let newlyApplied = false;
       for (const call of calls) {
         const result = await this.dispatch(req.mode, call, specs.find((s) => s.name === call.name)?.class);
+        const findings = call.name === "write_plan" ? [] : detectInjection(result.output);
+        if (findings.length) {
+          result.output = quarantine(result.output, findings, `the ${call.name} tool`);
+          deps.audit?.({ kind: "tool", name: `injection-warning ${call.name}`, detail: findings.map((f) => f.pattern).join("; ") });
+          yield { type: "injection", tool: call.name, findings };
+        }
         for (const t of result.touched ?? []) {
           if (t.applied) {
             const p = rel(t.path);

@@ -2,6 +2,7 @@
 
 mod indexer;
 mod lsp;
+mod proc;
 mod pty;
 
 use forge_core::fs::{self, DirEntry};
@@ -70,6 +71,61 @@ async fn run_command(cwd: String, command: String, timeout_ms: u64, env: Vec<(St
     .map_err(|e| e.to_string())?
 }
 
+#[derive(serde::Serialize)]
+struct SandboxOut {
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+    millis: u64,
+    mode: &'static str,
+    granted: Vec<String>,
+    warnings: Vec<String>,
+}
+
+fn mode_name(m: forge_core::sandbox::Mode) -> &'static str {
+    match m {
+        forge_core::sandbox::Mode::AppContainer => "appcontainer",
+        forge_core::sandbox::Mode::EnvOnly => "env-only",
+    }
+}
+
+/// Run an agent command confined to the workspace (AppContainer on Windows: no network, no profile or credential access).
+#[tauri::command]
+async fn sandbox_run(cwd: String, command: String, timeout_ms: u64, toolchain_read: bool) -> Result<SandboxOut, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let o = forge_core::sandbox::run(&command, Path::new(&cwd), std::time::Duration::from_millis(timeout_ms), 2_000_000, &forge_core::sandbox::Options { toolchain_read })?;
+        Ok(SandboxOut { code: o.result.code, stdout: o.result.stdout, stderr: o.result.stderr, timed_out: o.result.timed_out, millis: o.result.millis as u64, mode: mode_name(o.mode), granted: o.granted, warnings: o.warnings })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn sandbox_status() -> &'static str {
+    mode_name(forge_core::sandbox::available_mode())
+}
+
+#[tauri::command]
+fn bg_start(state: tauri::State<forge_core::bg::Background>, cwd: String, command: String) -> Result<u32, String> {
+    state.start(&command, Path::new(&cwd))
+}
+
+#[tauri::command]
+fn bg_read(state: tauri::State<forge_core::bg::Background>, id: u32, lines: usize) -> Result<forge_core::bg::BgOutput, String> {
+    state.read(id, lines)
+}
+
+#[tauri::command]
+fn bg_stop(state: tauri::State<forge_core::bg::Background>, id: u32) -> Result<(), String> {
+    state.stop(id)
+}
+
+#[tauri::command]
+fn bg_list(state: tauri::State<forge_core::bg::Background>) -> Vec<forge_core::bg::BgInfo> {
+    state.list()
+}
+
 /// The user's home directory, for personal memories.
 #[tauri::command]
 fn home_dir() -> Option<String> {
@@ -89,6 +145,8 @@ fn main() {
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
         .manage(indexer::IndexState::default())
+        .manage(proc::ProcState::default())
+        .manage(forge_core::bg::Background::default())
         .invoke_handler(tauri::generate_handler![
             list_dir,
             read_file,
@@ -98,6 +156,15 @@ fn main() {
             list_names,
             git_run,
             home_dir,
+            sandbox_run,
+            sandbox_status,
+            bg_start,
+            bg_read,
+            bg_stop,
+            bg_list,
+            proc::proc_start,
+            proc::proc_send,
+            proc::proc_stop,
             run_command,
             initial_workspace,
             pty::pty_spawn,

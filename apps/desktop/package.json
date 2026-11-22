@@ -28,7 +28,10 @@
     "@forge/verify": "*",
     "@forge/safety": "*",
     "@forge/plans": "*",
-    "@forge/context-store": "*"
+    "@forge/context-store": "*",
+    "@forge/mcp": "*",
+    "@forge/acp": "*",
+    "@forge/rpc": "*"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

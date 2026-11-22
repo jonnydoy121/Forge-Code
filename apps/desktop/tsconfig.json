@@ -49,6 +49,15 @@
     },
     {
       "path": "../../packages/context-store"
+    },
+    {
+      "path": "../../packages/mcp"
+    },
+    {
+      "path": "../../packages/acp"
+    },
+    {
+      "path": "../../packages/rpc"
     }
   ]
 }

@@ -17,6 +17,7 @@ import type { AskRequest, Remember } from "@forge/safety";
 import type { Mode } from "@forge/protocol";
 import { createWorkspaceServices, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
 import { loadSettings } from "./lib/settings";
+import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
 import { applyDiagnostics, clearPendingDecorations, errorMarkers, disposeDoc, getDoc, isDirty, openDoc, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
 import { LspManager, serverKeyFor, type ServerKey, type ServerStatus } from "./lib/lspManager";
@@ -50,6 +51,8 @@ export function App() {
   const [questionReq, setQuestionReq] = useState<{ questions: Question[]; resolve: (a: string[]) => void } | null>(null);
   const [addFileReq, setAddFileReq] = useState<{ question: string; path: string; resolve: (b: boolean) => void } | null>(null);
   const [report, setReport] = useState<ReportEvent | null>(null);
+  const [sandboxMode, setSandboxMode] = useState<string>("");
+  const [localOnly, setLocalOnly] = useState(() => loadSettings().localOnly);
   const [permission, setPermission] = useState<{ req: AskRequest; resolve: (a: Remember) => void } | null>(null);
   const rootRef = useRef<string | null>(null);
   const lsp = useRef(new LspManager());
@@ -65,8 +68,11 @@ export function App() {
       indexApi.onBuilt(() => void indexApi.status().then((status) => setIndexInfo({ status }))),
       indexApi.onUpdated(() => void indexApi.status().then((status) => setIndexInfo((i) => ({ ...i, status })))),
     ];
+    void invoke<string>("sandbox_status").then(setSandboxMode).catch(() => {});
+    const poll = setInterval(() => setLocalOnly(loadSettings().localOnly), 1000);
     fsApi.initialWorkspace().then((w) => w && void openFolder(w)).catch(() => {});
     return () => {
+      clearInterval(poll);
       for (const s of subs) void s.then((unlisten) => unlisten());
     };
   }, []);
@@ -353,6 +359,10 @@ export function App() {
         <span>{root ?? "No folder open"}</span>
         <span data-testid="index-status" title={indexInfo.status ? `${indexInfo.status.symbols} symbols, ${indexInfo.status.chunks} chunks` : ""}>
           {indexInfo.progress ? `Indexing: ${indexInfo.progress}` : indexInfo.status ? `Indexed ${indexInfo.status.indexed_files} files` : ""}
+        </span>
+        <span data-testid="safety-status" title="Agent commands run in the sandbox; local-only blocks every request that would leave this machine">
+          sandbox: {sandboxMode || "?"}
+          {localOnly ? " · local-only" : ""}
         </span>
         {building && <span data-testid="building" className="text-blue-400">Building plan…</span>}
         {pendingFiles.length > 0 && (
