@@ -104,8 +104,23 @@ export class AcpClient {
     return { protocolVersion: r.protocolVersion, authMethods: r.authMethods ?? [] };
   }
 
+  /** Modes the agent reported for the last session (e.g. "default" asks before edits, "acceptEdits" does not). */
+  modes: { current?: string; available: { id: string; name?: string }[] } = { available: [] };
+
   async newSession(cwd: string): Promise<string> {
-    return (await this.peer.request<{ sessionId: string }>("session/new", { cwd, mcpServers: [] }, { timeoutMs: 60_000 })).sessionId;
+    const r = await this.peer.request<{ sessionId: string; modes?: { currentModeId?: string; availableModes?: { id: string; name?: string }[] } }>("session/new", { cwd, mcpServers: [] }, { timeoutMs: 60_000 });
+    this.modes = { current: r.modes?.currentModeId, available: r.modes?.availableModes ?? [] };
+    // Never inherit the agent's own permissive default (e.g. Claude's "auto"/"acceptEdits" from the user's settings):
+    // if it offers a mode that asks before changes, use it so edits and commands reach Forge's permission gate.
+    if (this.modes.available.some((m) => m.id === "default") && this.modes.current !== "default") {
+      await this.setMode(r.sessionId, "default").then(() => (this.modes.current = "default")).catch(() => {});
+    }
+    return r.sessionId;
+  }
+
+  /** Switch the agent's mode (ACP session/set_mode). */
+  async setMode(sessionId: string, modeId: string): Promise<void> {
+    await this.peer.request("session/set_mode", { sessionId, modeId }, { timeoutMs: 30_000 });
   }
 
   /** Send a prompt; resolves with the stop reason when the agent's turn ends. Updates stream in via the handler. */

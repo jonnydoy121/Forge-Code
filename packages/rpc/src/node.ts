@@ -8,7 +8,13 @@ export interface SpawnedTransport extends LineTransport {
 
 /** Spawn a child process speaking newline-delimited JSON on stdio (Node hosts and tests). */
 export function spawnTransport(command: string, args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): SpawnedTransport {
-  const proc = spawn(command, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const common = { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"], windowsHide: true };
+  // Node refuses to spawn .cmd/.bat shims (npx, gemini, ...) directly on Windows (EINVAL): run them through cmd.exe.
+  const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  const quote = (a: string) => (a === "" || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+  const proc = shim
+    ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].map(quote).join(" ")}"`], { ...common, windowsVerbatimArguments: true })
+    : spawn(command, args, common);
   const stderr: string[] = [];
   let lineHandler: (l: string) => void = () => {};
   let closeHandler: () => void = () => {};

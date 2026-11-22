@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Live ACP agent (Claude Code via @agentclientprotocol/claude-agent-acp)
+- First run against a real external agent found that it starts in its own permissive mode ("auto", inherited from the user's Claude settings) and edited a file on disk without asking Forge. The ACP client now switches every session to the agent's ask-first mode ("default") when offered, so edits reach Forge's permission gate. Verified live: Forge was asked for Read (allowed) and Edit (refused), and the file stayed unchanged. Opt-in test: `FORGE_LIVE_ACP=1 npx vitest run packages/acp/test/live` (uses the developer's Claude account).
+- Fixed `spawnTransport` on Windows (`spawn EINVAL` for .cmd shims such as npx).
+- Not yet done: approved agent edits land on disk when the permission is granted; they are not converted into Forge pending-change proposals.
 ### Remaining-gaps follow-up
 - Pending changes persist across restarts (.forge/pending, restored with reasons, decisions and change sets; the normal conflict check still runs on accept).
 - The agent loop can run in its own OS process: `forge-runtime`, a Node single-executable (`npm run build:sidecar`, about 100 MB because it embeds Node) bundled as a Tauri `externalBin` and driven over newline-delimited JSON on stdio (same protocol as the worker, `stdio.ts`). Falls back to the Web Worker if it cannot start; the panel shows `agent: process|worker`. Exits when the host closes its stdin, so no orphans. Verified: unit test against a real child process and against the packaged exe, and an e2e in the real window asserting `agent: process`.

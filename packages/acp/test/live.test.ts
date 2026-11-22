@@ -8,8 +8,10 @@ import { spawnTransport } from "@forge/rpc/src/node";
 import { denyReason } from "@forge/safety";
 import { AcpClient, forgeAcpHandlers, type AcpUpdate } from "../src";
 
+const isRead = (title: string) => /^\w+: Read /.test(title);
+
 describe.skipIf(!process.env.FORGE_LIVE_ACP)("live: Claude Code over ACP", () => {
-  it("handshakes, reads through Forge, and its edit arrives as a pending proposal (never written to disk)", async () => {
+  it("handshakes, is forced into ask-first mode, and an edit it attempts reaches Forge's gate (refused: nothing is written)", async () => {
     const root = mkdtempSync(join(tmpdir(), "forge-live-acp-")).replace(/[\\]/g, "/");
     writeFileSync(`${root}/hello.txt`, "greeting: foo\n");
     const proposals: { path: string; content: string; reason: string }[] = [];
@@ -29,7 +31,7 @@ describe.skipIf(!process.env.FORGE_LIVE_ACP)("live: Claude Code over ACP", () =>
             }
           },
           propose: async (path, content, reason) => (proposals.push({ path, content, reason }), { status: "pending" }),
-          ask: async (r) => (asked.push(r.title), "once"),
+          ask: async (r) => (asked.push(r.title), isRead(r.title) ? "once" : "deny"), // allow reads, refuse everything else
           onUpdate: (u) => updates.push(u),
           denyReason,
           agentName: "claude",
@@ -38,15 +40,18 @@ describe.skipIf(!process.env.FORGE_LIVE_ACP)("live: Claude Code over ACP", () =>
       await client.initialize();
       expect(client.agentInfo?.name).toBeTruthy();
       const session = await client.newSession(root);
+      console.log("modes:", JSON.stringify(client.modes));
       await client.prompt(session, "In hello.txt change the word foo to bar. Make only that edit, then reply done.");
       const text = updates.filter((u) => u.kind === "message").map((u) => (u as { text: string }).text).join("");
       console.log("agent:", client.agentInfo, "| asked:", asked, "| proposals:", proposals.map((p) => p.path), "| reply:", text.slice(0, 200));
+      console.log("tool calls:", JSON.stringify(updates.filter((u) => u.kind === "tool_call" || u.kind === "tool_call_update")).slice(0, 1500));
+      const onDisk = readFileSync(`${root}/hello.txt`, "utf8");
+      console.log("hello.txt on disk afterwards:", JSON.stringify(onDisk), "| update kinds:", [...new Set(updates.map((u) => u.kind))]);
       expect(updates.length).toBeGreaterThan(0);
-      // Whatever route the agent used, nothing may have been written behind Forge's back when the edit went through us.
-      if (proposals.length) {
-        expect(proposals[0]!.content).toContain("bar");
-        expect(readFileSync(`${root}/hello.txt`, "utf8")).toBe("greeting: foo\n");
-      }
+      // Forge forced the agent into its ask-first mode, so the edit reached our gate, we refused, and nothing changed.
+      expect(client.modes.current).toBe("default");
+      expect(asked.some((t) => !isRead(t)), "the edit never reached Forge's permission gate").toBe(true);
+      expect(onDisk).toBe("greeting: foo\n");
     } finally {
       t.close();
     }
