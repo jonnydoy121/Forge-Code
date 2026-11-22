@@ -6,25 +6,48 @@ export type ToolClass = "read" | "write" | "execute" | "network";
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
 export interface ToolResult { id: string; ok: boolean; output: string }
 
+/** Tool description sent to the model. `parameters` is a JSON Schema object. */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  class: ToolClass;
+}
+
 // Model gateway
-export interface Message { role: "system" | "user" | "assistant" | "tool"; content: string }
+export interface Message {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  /** assistant messages: tool calls the model made */
+  toolCalls?: ToolCall[];
+  /** tool messages: which call this answers */
+  toolCallId?: string;
+}
+export interface Usage { inputTokens: number; outputTokens: number; costUsd: number }
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "tool_call"; call: ToolCall }
-  | { type: "done"; usage: { inputTokens: number; outputTokens: number; costUsd: number } };
+  | { type: "done"; usage: Usage };
+export interface ModelRequest {
+  provider: string;
+  model: string;
+  messages: Message[];
+  tools?: ToolSpec[];
+  signal?: AbortSignal;
+}
 export interface ModelGateway {
-  stream(req: { provider: string; model: string; messages: Message[] }): AsyncIterable<StreamEvent>;
+  stream(req: ModelRequest): AsyncIterable<StreamEvent>;
 }
 
 // Tool host + permission gate
 export type PermissionDecision = "allow" | "ask" | "deny";
 export interface ToolHost {
   /** Tools exposed to the model for a mode. Ask/Plan MUST omit write and execute tools. */
-  listTools(mode: Mode): { name: string; class: ToolClass }[];
+  listTools(mode: Mode): ToolSpec[];
   call(mode: Mode, call: ToolCall): Promise<ToolResult>;
 }
 export interface PermissionGate {
-  check(toolClass: ToolClass, call: ToolCall): PermissionDecision;
+  check(toolClass: ToolClass, call: ToolCall): PermissionDecision | Promise<PermissionDecision>;
 }
 
 // Checkpoint store
@@ -57,6 +80,13 @@ export type HookEvent =
 export interface HookConfig { event: HookEvent; command: string }
 
 // Agent runtime
+export type AgentEvent =
+  | StreamEvent
+  | { type: "tool_result"; result: ToolResult; name: string }
+  | { type: "limit"; reason: "steps" | "cost" | "aborted" };
 export interface AgentRuntime {
-  run(req: { mode: Mode; prompt: string }): AsyncIterable<StreamEvent>;
+  run(req: { mode: Mode; prompt: string }): AsyncIterable<AgentEvent>;
 }
+
+export * from "./modes";
+export * from "./paths";

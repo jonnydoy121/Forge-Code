@@ -1,6 +1,33 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "jsx": "react-jsx", "lib": ["ES2022", "DOM", "DOM.Iterable"], "outDir": "dist-ts", "rootDir": ".", "noEmit": false, "emitDeclarationOnly": true },
-  "include": ["src", "vite.config.ts"],
-  "references": [{ "path": "../../packages/protocol" }]
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "outDir": "dist-ts",
+    "rootDir": ".",
+    "noEmit": false,
+    "emitDeclarationOnly": true
+  },
+  "include": [
+    "src",
+    "vite.config.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/protocol"
+    },
+    {
+      "path": "../../packages/agent-runtime"
+    },
+    {
+      "path": "../../packages/model-gateway"
+    },
+    {
+      "path": "../../packages/tool-host"
+    }
+  ]
 }

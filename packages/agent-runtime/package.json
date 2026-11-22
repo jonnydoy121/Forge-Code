@@ -1,1 +1,12 @@
-{ "name": "@forge/agent-runtime", "version": "0.0.0", "private": true, "type": "module", "main": "src/index.ts", "dependencies": { "@forge/protocol": "*" } }
+{
+  "name": "@forge/agent-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@forge/protocol": "*",
+    "@forge/model-gateway": "*",
+    "@forge/tool-host": "*"
+  }
+}

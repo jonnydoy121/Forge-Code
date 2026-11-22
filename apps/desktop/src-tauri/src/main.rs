@@ -30,6 +30,7 @@ fn initial_workspace() -> Option<String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
         .invoke_handler(tauri::generate_handler![

@@ -5,6 +5,7 @@ import { FileTree } from "./components/FileTree";
 import { TabBar } from "./components/TabBar";
 import { Terminal } from "./components/Terminal";
 import { CommandPalette } from "./components/CommandPalette";
+import { AgentPanel } from "./components/AgentPanel";
 import { fsApi } from "./lib/ipc";
 import { applyDiagnostics, disposeDoc, getDoc, isDirty, openDoc, saveDoc } from "./lib/monaco";
 import { LspManager, serverKeyFor, type ServerKey, type ServerStatus } from "./lib/lspManager";
@@ -19,6 +20,7 @@ export function App() {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [dark, setDark] = useState(true);
+  const [agentOpen, setAgentOpen] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [cursor, setCursor] = useState<[number, number]>([1, 1]);
   const [counts, setCounts] = useState<Record<string, [number, number]>>({});
@@ -89,6 +91,7 @@ export function App() {
       { id: "save", title: "File: Save", keybinding: "Ctrl+S", run: () => void save() },
       { id: "close-tab", title: "View: Close Editor", keybinding: "Ctrl+W", run: () => tabs.active && void closeTab(tabs.active) },
       { id: "terminal", title: "View: Toggle Terminal", keybinding: "Ctrl+`", run: () => toggleTerminal() },
+      { id: "agent-panel", title: "View: Toggle Agent Panel", keybinding: "Ctrl+L", run: () => setAgentOpen((o) => !o) },
       { id: "theme", title: "View: Toggle Light/Dark Theme", run: () => setDark((d) => !d) },
     ],
     [chooseFolder, save, closeTab, tabs.active],
@@ -152,6 +155,7 @@ export function App() {
             </div>
           )}
         </section>
+        {agentOpen && <AgentPanel root={root} activePath={tabs.active} />}
       </div>
       <footer className="flex gap-4 border-t border-[var(--border)] bg-[var(--panel)] px-3 py-0.5 text-xs text-[var(--muted)]" data-testid="status">
         <span>{root ?? "No folder open"}</span>
