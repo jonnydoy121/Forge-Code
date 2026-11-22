@@ -8,6 +8,7 @@ import { attachmentKey, attachmentLabel, resolveAttachment, type Attachment } fr
 import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord } from "@forge/context-store";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
+import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
@@ -128,10 +129,16 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     }
   }, [externalReport]);
 
+  // The API key lives in the OS credential store: load it for the current provider (after migrating any old copy).
+  useEffect(() => {
+    void migrateLegacyKey().then(() => loadApiKey(settings.provider)).then((k) => setSettings((cur) => (cur.apiKey === k ? cur : { ...cur, apiKey: k })));
+  }, [settings.provider]);
+
   const update = (patch: Partial<AgentSettings>) => {
     const next = { ...settings, ...patch };
     setSettings(next);
     saveSettings(next);
+    if (patch.apiKey !== undefined) void storeApiKey(next.provider, patch.apiKey);
   };
 
   async function send(override?: { prompt: string; mode?: Mode; skipSuggest?: boolean }): Promise<RunOutcome> {
@@ -414,7 +421,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           <label className="block"><input type="checkbox" data-testid="sandbox-on" checked={settings.sandbox} onChange={(e) => update({ sandbox: e.target.checked })} /> Run agent commands in the OS sandbox (workspace only, no network)</label>
           <label className="block"><input type="checkbox" checked={settings.toolchainRead} onChange={(e) => update({ toolchainRead: e.target.checked })} /> Let the sandbox read tool folders on PATH (adds read-only access for node, git, ...)</label>
           <label className="block">Max minutes per run <input type="number" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /></label>
-          <p className="text-[var(--muted)]">Key is stored in this app's local storage (OS keychain arrives in Phase 8).</p>
+          <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>
         </div>
       )}
 

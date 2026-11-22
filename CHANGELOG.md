@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+### Security follow-up
+- API keys now live in the OS credential store (Windows Credential Manager via the keyring crate), per provider; existing keys in local storage are migrated and settings never persist them.
 ### Phase 9 - Polish
 - First-run welcome: privacy choice (local-only vs hosted) and edit-review preference come first; keyboard-operable; reachable again from the palette.
 - Accessibility: axe-core audit (no serious or critical violations in editor, agent panel, settings, Context, Plan and palette views) with fixes to the file tree (tree/treeitem/group), tabs (no nested controls), tab lists and the palette listbox; keyboard-only flows tested.

@@ -24,3 +24,12 @@ describe("settings", () => {
     expect(sendsCodeOffMachine({ ...DEFAULT_SETTINGS, provider: "openai", baseUrl: "http://127.0.0.1:8080/v1" })).toBe(false);
   });
 });
+
+describe("api key storage", () => {
+  it("never writes the API key to local storage", () => {
+    const s = memory();
+    saveSettings({ ...DEFAULT_SETTINGS, apiKey: "sk-ant-api03-abcdefghijklmnopqrstuvwx" }, s);
+    expect(s.getItem("forge.settings.v1")).not.toContain("sk-ant");
+    expect(loadSettings(s).apiKey).toBe("");
+  });
+});

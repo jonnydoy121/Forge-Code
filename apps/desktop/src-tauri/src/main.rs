@@ -126,6 +126,21 @@ fn bg_list(state: tauri::State<forge_core::bg::Background>) -> Vec<forge_core::b
     state.list()
 }
 
+#[tauri::command]
+fn secret_set(name: String, value: String) -> Result<(), String> {
+    forge_core::secrets::set(&name, &value)
+}
+
+#[tauri::command]
+fn secret_get(name: String) -> Result<Option<String>, String> {
+    forge_core::secrets::get(&name)
+}
+
+#[tauri::command]
+fn secret_delete(name: String) -> Result<(), String> {
+    forge_core::secrets::delete(&name)
+}
+
 /// The user's home directory, for personal memories.
 #[tauri::command]
 fn home_dir() -> Option<String> {
@@ -156,6 +171,9 @@ fn main() {
             list_names,
             git_run,
             home_dir,
+            secret_set,
+            secret_get,
+            secret_delete,
             sandbox_run,
             sandbox_status,
             bg_start,

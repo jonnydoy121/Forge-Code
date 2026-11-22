@@ -7,6 +7,7 @@ pub mod git;
 pub mod index;
 pub mod lsp;
 pub mod sandbox;
+pub mod secrets;
 
 pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 

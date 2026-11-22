@@ -65,7 +65,8 @@ export function loadSettings(storage: StorageLike = localStorage): AgentSettings
 }
 
 export function saveSettings(s: AgentSettings, storage: StorageLike = localStorage) {
-  storage.setItem(KEY, JSON.stringify(s));
+  // The API key is kept in the OS credential store, never in local storage.
+  storage.setItem(KEY, JSON.stringify({ ...s, apiKey: "" }));
 }
 
 /** True when a request with these settings would leave the machine. */
