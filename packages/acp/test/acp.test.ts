@@ -131,3 +131,57 @@ describe("parseAcpConfig", () => {
     expect(parseAcpConfig(null)).toEqual({ agents: [], errors: [] });
   });
 });
+
+describe("agent edits become pending changes", () => {
+  const options = [
+    { optionId: "a", name: "Allow", kind: "allow_once" as const },
+    { optionId: "r", name: "Reject", kind: "reject_once" as const },
+  ];
+  const editCall = (rawInput: Record<string, unknown>) => ({ toolCallId: "t", title: "Edit f.js", kind: "edit", rawInput });
+
+  it("captures an Edit as a proposal, refuses the agent's own write, and never prompts", async () => {
+    const h = harness();
+    const handlers = forgeAcpHandlers(h.deps);
+    const out = await handlers.requestPermission({ toolCall: editCall({ file_path: "/ws/greet.js", old_string: "const x = 1;", new_string: "const x = 2;" }), options });
+    expect(out).toEqual({ optionId: "r" });
+    expect(h.asked).toEqual([]);
+    expect(h.proposals).toEqual([{ path: "/ws/greet.js", content: "export const greet = (n) => n;\nconst x = 2;\n", reason: "Edit by mock" }]);
+    expect(h.disk.get("/ws/greet.js")).toContain("const x = 1;"); // never written
+  });
+
+  it("captures a whole-file Write, and replace_all", async () => {
+    const h = harness();
+    const handlers = forgeAcpHandlers(h.deps);
+    await handlers.requestPermission({ toolCall: editCall({ file_path: "/ws/new.js", content: "export {};\n" }), options });
+    h.disk.set("/ws/many.js", "a a a");
+    await handlers.requestPermission({ toolCall: editCall({ file_path: "/ws/many.js", old_string: "a", new_string: "b", replace_all: true }), options });
+    expect(h.proposals.map((p) => [p.path, p.content])).toEqual([["/ws/new.js", "export {};\n"], ["/ws/many.js", "b b b"]]);
+  });
+
+  it("falls back to the normal prompt when the edit cannot be derived safely (ambiguous, missing text, no path)", async () => {
+    const h = harness("once");
+    h.disk.set("/ws/dup.js", "x x");
+    const handlers = forgeAcpHandlers(h.deps);
+    for (const input of [{ file_path: "/ws/dup.js", old_string: "x", new_string: "y" }, { file_path: "/ws/greet.js", old_string: "nope", new_string: "y" }, { old_string: "a", new_string: "b" }]) {
+      expect(await handlers.requestPermission({ toolCall: editCall(input), options })).toEqual({ optionId: "a" });
+    }
+    expect(h.proposals).toEqual([]);
+    expect(h.asked).toHaveLength(3);
+  });
+
+  it("refuses edits to secrets and outside the workspace instead of capturing them", async () => {
+    const h = harness("deny");
+    const handlers = forgeAcpHandlers(h.deps);
+    for (const file_path of ["/ws/.env", "/outside/secret.txt"]) {
+      expect(await handlers.requestPermission({ toolCall: editCall({ file_path, old_string: "a", new_string: "b" }), options })).toEqual({ optionId: "r" });
+    }
+    expect(h.proposals).toEqual([]);
+  });
+
+  it("can be switched off to keep the old prompt-then-agent-writes behaviour", async () => {
+    const h = harness("once");
+    const handlers = forgeAcpHandlers({ ...h.deps, interceptEdits: false });
+    expect(await handlers.requestPermission({ toolCall: editCall({ file_path: "/ws/greet.js", old_string: "const x = 1;", new_string: "const x = 2;" }), options })).toEqual({ optionId: "a" });
+    expect(h.proposals).toEqual([]);
+  });
+});

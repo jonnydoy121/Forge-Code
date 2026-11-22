@@ -11,7 +11,7 @@ import { AcpClient, forgeAcpHandlers, type AcpUpdate } from "../src";
 const isRead = (title: string) => /^\w+: Read /.test(title);
 
 describe.skipIf(!process.env.FORGE_LIVE_ACP)("live: Claude Code over ACP", () => {
-  it("handshakes, is forced into ask-first mode, and an edit it attempts reaches Forge's gate (refused: nothing is written)", async () => {
+  it("handshakes, is forced into ask-first mode, and its edit becomes a pending proposal (nothing is written to disk)", async () => {
     const root = mkdtempSync(join(tmpdir(), "forge-live-acp-")).replace(/[\\]/g, "/");
     writeFileSync(`${root}/hello.txt`, "greeting: foo\n");
     const proposals: { path: string; content: string; reason: string }[] = [];
@@ -48,9 +48,12 @@ describe.skipIf(!process.env.FORGE_LIVE_ACP)("live: Claude Code over ACP", () =>
       const onDisk = readFileSync(`${root}/hello.txt`, "utf8");
       console.log("hello.txt on disk afterwards:", JSON.stringify(onDisk), "| update kinds:", [...new Set(updates.map((u) => u.kind))]);
       expect(updates.length).toBeGreaterThan(0);
-      // Forge forced the agent into its ask-first mode, so the edit reached our gate, we refused, and nothing changed.
+      // Forge forced the agent into its ask-first mode; its Edit arrived as a pending proposal, was never prompted for as a
+      // direct write, and nothing reached the disk.
       expect(client.modes.current).toBe("default");
-      expect(asked.some((t) => !isRead(t)), "the edit never reached Forge's permission gate").toBe(true);
+      expect(asked.every(isRead), `unexpected prompts: ${asked.join(", ")}`).toBe(true);
+      expect(proposals, "the agent's edit was not captured as a proposal").toHaveLength(1);
+      expect(proposals[0]!.content).toBe("greeting: bar\n");
       expect(onDisk).toBe("greeting: foo\n");
     } finally {
       t.close();

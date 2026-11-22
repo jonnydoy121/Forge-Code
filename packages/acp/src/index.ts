@@ -152,7 +152,26 @@ export interface ForgeAcpDeps {
   /** classify a shell command from a tool call's raw input (deny list); returns a reason or null */
   denyReason?(command: string): string | null;
   agentName?: string;
+  /** default true: edits an agent asks permission for become pending changes instead of being written by the agent */
+  interceptEdits?: boolean;
   audit?(e: { kind: "external"; name: string; detail?: string; blocked?: boolean }): void;
+}
+
+/** The file and new content an agent's Edit/Write permission request describes, or null if it cannot be derived safely. */
+async function captureEdit(tc: ToolCallInfo & { content?: { type?: string; path?: string }[] }, d: ForgeAcpDeps, confine: (raw: string, forWrite: boolean) => string): Promise<{ path: string; content: string } | null> {
+  const input = (tc.rawInput ?? {}) as { file_path?: unknown; path?: unknown; old_string?: unknown; new_string?: unknown; replace_all?: unknown; content?: unknown };
+  const raw = [input.file_path, input.path, tc.content?.find((c) => c.type === "diff")?.path].find((x): x is string => typeof x === "string");
+  if (!raw) return null;
+  const path = confine(raw, true);
+  const current = await d.read(path);
+  if (typeof input.old_string === "string" && typeof input.new_string === "string") {
+    if (current === null || input.old_string === "" || !current.includes(input.old_string)) return null;
+    const all = input.replace_all === true;
+    if (!all && current.indexOf(input.old_string) !== current.lastIndexOf(input.old_string)) return null; // ambiguous: let the normal prompt handle it
+    return { path, content: all ? current.split(input.old_string).join(input.new_string) : current.replace(input.old_string, () => input.new_string as string) };
+  }
+  if (typeof input.content === "string") return { path, content: input.content }; // Write: whole-file content
+  return null;
 }
 
 export function forgeAcpHandlers(d: ForgeAcpDeps): AcpHandlers {
@@ -192,13 +211,22 @@ export function forgeAcpHandlers(d: ForgeAcpDeps): AcpHandlers {
       d.audit?.({ kind: "external", name: `${agent} write ${raw}`, detail: out.status });
     },
     async requestPermission({ toolCall, options }) {
+      const pick = (...kinds: PermissionOption["kind"][]) => kinds.map((k) => options.find((o) => o.kind === k)).find(Boolean);
+      // An agent's own file edit must not land on disk unreviewed. When the request carries the edit, compute the new
+      // content here, hand it to the pending-changes model, and refuse the agent's direct write.
+      const edit = toolCall.kind === "edit" && d.interceptEdits !== false ? await captureEdit(toolCall, d, confine).catch(() => null) : null;
+      if (edit) {
+        const out = await d.propose(edit.path, edit.content, `Edit by ${agent}`);
+        d.audit?.({ kind: "external", name: `${agent} edit ${edit.path}`, detail: `captured as ${out.status}; the agent's direct write was refused` });
+        const reject = pick("reject_once", "reject_always");
+        return reject ? { optionId: reject.optionId } : "cancelled";
+      }
       const title = toolCall.title ?? toolCall.kind ?? "an action";
       const input = toolCall.rawInput as { command?: unknown } | undefined;
       const command = typeof input?.command === "string" ? input.command : undefined;
       const danger = (command && d.denyReason?.(command)) || undefined;
       const answer = await d.ask({ title: `${agent}: ${title}`, summary: command ? `${agent} wants to run: ${command}` : `${agent} wants to: ${title}`, danger });
       d.audit?.({ kind: "external", name: `${agent} permission: ${title}`, detail: answer, blocked: answer === "deny" });
-      const pick = (...kinds: PermissionOption["kind"][]) => kinds.map((k) => options.find((o) => o.kind === k)).find(Boolean);
       const chosen = answer === "deny" ? pick("reject_once", "reject_always") : answer === "once" || danger ? pick("allow_once", "allow_always") : pick("allow_always", "allow_once");
       return chosen ? { optionId: chosen.optionId } : "cancelled";
     },
