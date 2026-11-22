@@ -31,8 +31,7 @@ jobs:
           code=${PIPESTATUS[0]}
           if [ "$code" != "0" ]; then
             # Public annotations carry the failure summary (job logs need authentication to read).
-            msg=$(grep -E "^error|panicked|FAILED|failed|^---- " cargo-test.log | head -c 3500 | tr '
-' '|')
+            msg=$(grep -E "^error|panicked|FAILED|failed|^---- " cargo-test.log | head -c 3500 | paste -sd '|' -)
             echo "::error title=cargo test failed::$msg"
           fi
           exit $code
