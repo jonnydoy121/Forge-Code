@@ -1,6 +1,7 @@
 //! Workspace indexer: Merkle change detection, tree-sitter symbols, symbol graph, embeddings, repo map and
 //! retrieval APIs. Per-file results persist in SQLite so restarts only re-process changed files.
 
+pub mod cache;
 pub mod embed;
 pub mod graph;
 pub mod merkle;
@@ -130,6 +131,7 @@ pub struct Index {
     pub(crate) state: RwLock<State>,
     embedder: Box<dyn Embedder>,
     embed_calls: AtomicUsize,
+    cache: cache::ContentCache,
 }
 
 type Err = String;
@@ -163,7 +165,7 @@ impl Index {
              CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER, mtime INTEGER, data TEXT NOT NULL, vecs BLOB NOT NULL);",
         )
         .map_err(e)?;
-        let idx = Index { root: root.to_path_buf(), db: Mutex::new(conn), state: RwLock::new(State::default()), embedder, embed_calls: AtomicUsize::new(0) };
+        let idx = Index { root: root.to_path_buf(), db: Mutex::new(conn), state: RwLock::new(State::default()), embedder, embed_calls: AtomicUsize::new(0), cache: cache::ContentCache::new(768 * 1024 * 1024) };
         idx.load_from_db()?;
         Ok(idx)
     }
@@ -233,6 +235,7 @@ impl Index {
             return None; // binary
         }
         let content = String::from_utf8(bytes).ok()?;
+        self.cache.put(rel, &content);
         let hash = blake3::hash(content.as_bytes()).to_hex().to_string();
         let parsed = parse::parse(rel, &content);
         let cache: HashMap<&str, &Vec<f32>> = prev.map(|p| p.parsed.chunks.iter().zip(&p.vecs).map(|(c, v)| (c.hash.as_str(), v)).collect()).unwrap_or_default();
@@ -428,6 +431,7 @@ impl Index {
             self.persist(&[], &gone)?;
             let mut st = self.state.write().unwrap();
             for p in &gone {
+                self.cache.remove(p);
                 Self::remove_contrib(&mut st, p);
                 st.files.remove(p);
             }
@@ -472,6 +476,7 @@ impl Index {
         self.persist(&[], &[rel.to_string()])?;
         let mut st = self.state.write().unwrap();
         Self::remove_contrib(&mut st, rel);
+        self.cache.remove(rel);
         st.files.remove(rel);
         st.all_files.retain(|f| f != rel);
         st.graph = None;
@@ -479,6 +484,15 @@ impl Index {
     }
 
     // ---------- retrieval ----------
+
+    /// File content for searching: from memory when cached, otherwise read once from disk and cached.
+    fn content(&self, rel: &str) -> Option<std::sync::Arc<str>> {
+        if let Some(c) = self.cache.get(rel) {
+            return Some(c);
+        }
+        let text = std::fs::read_to_string(self.abs(rel)).ok()?;
+        Some(self.cache.put(rel, &text))
+    }
 
     fn glob_matcher(glob: &str) -> Result<GlobMatcher, Err> {
         let g = if glob.contains('/') { glob.to_string() } else { format!("**/{glob}") };
@@ -500,8 +514,9 @@ impl Index {
                 if count.load(Ordering::Relaxed) >= max {
                     return out.into_iter();
                 }
-                if let Ok(text) = std::fs::read_to_string(self.abs(rel)) {
-                    if !prefilter.is_match(&text) {
+                if let Some(text) = self.content(rel) {
+                    let text: &str = &text;
+                    if !prefilter.is_match(text) {
                         return out.into_iter();
                     }
                     for (i, line) in text.lines().enumerate() {
@@ -579,7 +594,7 @@ impl Index {
             .par_iter()
             .flat_map_iter(|rel| {
                 let mut out = Vec::new();
-                if let Ok(text) = std::fs::read_to_string(self.abs(rel)) {
+                if let Some(text) = self.content(rel) {
                     for (i, line) in text.lines().enumerate() {
                         if re.is_match(line) {
                             out.push(RefHit { file: rel.clone(), line: i as u32 + 1, text: line.trim().chars().take(200).collect(), is_definition: defs.contains(&(rel.clone(), i as u32 + 1)) });

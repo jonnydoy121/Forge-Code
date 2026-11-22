@@ -53,6 +53,24 @@ export interface ChangeSetInfo { id: string; label: string; step?: number; files
 
 const textOf = (t: string | null) => t ?? "";
 
+/** What is saved to disk so pending changes survive a restart. Hunks are recomputed on load. */
+export interface PendingState {
+  version: 1;
+  seq: number;
+  currentSet: string;
+  sets: ChangeSetInfo[];
+  files: {
+    path: string;
+    base: string | null;
+    proposed: string | null;
+    changeSet: string;
+    step?: number;
+    reasons: Record<string, string>;
+    resolved: Record<string, Decision>;
+    warnings: string[];
+  }[];
+}
+
 /** Agent edits layered over the real files. Nothing reaches disk until accepted (or auto-applied, always with a checkpoint). */
 export class PendingChanges {
   private files = new Map<string, PendingFile>();
@@ -64,6 +82,47 @@ export class PendingChanges {
 
   constructor(private deps: PendingDeps) {
     this.beginChangeSet("changes");
+  }
+
+  /** Serialisable snapshot of everything still pending. */
+  exportState(): PendingState {
+    return {
+      version: 1,
+      seq: this.seq,
+      currentSet: this.currentSet,
+      sets: [...this.sets.values()],
+      files: this.list().map((f) => ({ path: f.path, base: f.base, proposed: f.proposed, changeSet: f.changeSet, step: f.step, reasons: f.reasons, resolved: f.resolved, warnings: f.warnings })),
+    };
+  }
+
+  /**
+   * Restore a snapshot. Hunk ids are content-derived, so reasons and decisions line up again. Files that changed on
+   * disk since are NOT touched here: the normal conflict check runs when the developer accepts.
+   */
+  importState(state: PendingState) {
+    if (state?.version !== 1) return;
+    this.files.clear();
+    this.sets.clear();
+    for (const s of state.sets) this.sets.set(s.id, { ...s, files: [...s.files] });
+    this.seq = Math.max(this.seq, state.seq);
+    this.currentSet = this.sets.has(state.currentSet) ? state.currentSet : this.currentSet;
+    if (!this.sets.has(this.currentSet)) this.beginChangeSet("changes");
+    for (const f of state.files) {
+      const hunks = diffHunks(splitLines(textOf(f.base)), splitLines(textOf(f.proposed)));
+      this.files.set(f.path, {
+        path: f.path,
+        base: f.base,
+        proposed: f.proposed,
+        changeSet: f.changeSet,
+        step: f.step,
+        hunks,
+        reasons: Object.fromEntries(hunks.map((h) => [h.id, f.reasons[h.id] ?? ""])),
+        resolved: Object.fromEntries(Object.entries(f.resolved).filter(([id]) => hunks.some((h) => h.id === id))),
+        stats: statsOf(hunks),
+        warnings: f.warnings ?? [],
+      });
+    }
+    this.notify();
   }
 
   beginChangeSet(label: string, step?: number): string {

@@ -235,3 +235,50 @@ describe("guard (weakening protection)", () => {
     expect(applied).toEqual(["/ws/a.test.ts"]);
   });
 });
+
+describe("persistence across restarts", () => {
+  it("exports and re-imports pending files, reasons, decisions, change sets and warnings", async () => {
+    const a = setup();
+    a.disk.set("/ws/f", five([]));
+    a.p.beginChangeSet("Rename", 3);
+    await a.p.propose("/ws/f", five([2, 20]), "reason one");
+    const id = a.p.get("/ws/f")!.hunks[0]!.id;
+    // decide one hunk (the other stays open, so the file stays pending)
+    await a.p.resolveHunk("/ws/f", id, "rejected");
+    const saved = JSON.parse(JSON.stringify(a.p.exportState())); // through JSON, as on disk
+
+    const b = setup(); // a fresh process
+    b.disk.set("/ws/f", five([]));
+    b.p.importState(saved);
+    const f = b.p.get("/ws/f")!;
+    expect(f.hunks).toHaveLength(2);
+    expect(f.step).toBe(3);
+    expect(f.resolved[id]).toBe("rejected");
+    expect(Object.values(f.reasons)).toEqual(["reason one", "reason one"]);
+    expect(b.p.changeSets()[0]).toMatchObject({ label: "Rename", step: 3 });
+    expect(b.disk.get("/ws/f")).toBe(five([])); // restoring never writes
+    // the restored change can still be accepted, with the rejected hunk left out
+    const other = f.hunks.find((h) => h.id !== id)!;
+    await b.p.resolveHunk("/ws/f", other.id, "accepted");
+    expect(b.disk.get("/ws/f")).toBe(five([20]));
+  });
+
+  it("restored changes still hit the conflict check if the file changed while Forge was closed", async () => {
+    const a = setup();
+    a.disk.set("/ws/g", "one\ntwo\nthree");
+    await a.p.propose("/ws/g", "one\nTWO-agent\nthree");
+    const saved = JSON.parse(JSON.stringify(a.p.exportState()));
+    const b = setup();
+    b.disk.set("/ws/g", "one\nTWO-dev\nthree"); // edited while closed
+    b.p.importState(saved);
+    expect((await b.p.resolveAll("/ws/g", "accepted")).status).toBe("conflict");
+    expect(b.disk.get("/ws/g")).toBe("one\nTWO-dev\nthree");
+  });
+
+  it("ignores unknown or corrupt state", () => {
+    const b = setup();
+    b.p.importState({ version: 2 } as never);
+    b.p.importState(undefined as never);
+    expect(b.p.list()).toEqual([]);
+  });
+});

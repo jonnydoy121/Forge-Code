@@ -217,6 +217,15 @@ export async function createWorkspaceServices(opts: {
     });
 
   const auditRef: { current: AuditLog | null } = { current: null };
+  // Pending changes survive restarts: saved (debounced) to .forge/pending and restored below.
+  const pendingFile = `${root}/.forge/pending/${sessionId}.json`;
+  let restored = false;
+  let persistTimer: ReturnType<typeof setTimeout> | undefined;
+  const schedulePersist = () => {
+    if (!restored) return;
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => void diskFs.write(pendingFile, JSON.stringify(pending.exportState())).catch(() => {}), 200);
+  };
   let verifyTimer: ReturnType<typeof setTimeout> | undefined;
   const pending = new PendingChanges({
     fs: diskFs,
@@ -225,7 +234,10 @@ export async function createWorkspaceServices(opts: {
     planFiles: opts.planFiles,
     historyLength: () => runtime?.history.length ?? 0,
     guard: (path, base, proposed) => detectWeakening(rel(path), base, proposed),
-    onChange: opts.onChange,
+    onChange: () => {
+      opts.onChange();
+      schedulePersist();
+    },
     onApplied: async (path, origin) => {
       const r = rel(path);
       auditRef.current?.record({ kind: "file", name: `write ${r}`, detail: origin === "agent-auto" ? "applied automatically (checkpointed)" : "accepted by the developer" });
@@ -275,6 +287,14 @@ export async function createWorkspaceServices(opts: {
   };
   fetchTextLate = fetchText;
   auditRef.current = audit;
+
+  try {
+    const saved = await diskFs.read(pendingFile);
+    if (saved) pending.importState(JSON.parse(saved));
+  } catch {
+    /* a corrupt snapshot is ignored: pending changes are a convenience, never a source of truth */
+  }
+  restored = true;
 
   const sink: EditSink = {
     authorize: (path) => planGuard.authorize(path),
