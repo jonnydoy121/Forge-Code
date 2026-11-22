@@ -18,6 +18,9 @@ import type { AskRequest, Remember } from "@forge/safety";
 import type { Mode } from "@forge/protocol";
 import { createWorkspaceServices, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
 import { loadSettings } from "./lib/settings";
+import { loadApiKey } from "./lib/secrets";
+import { completeOnce } from "./lib/agentSession";
+import { buildInlinePrompt, extractReplacement, spliceSelection, type InlineContext } from "./lib/inlineEdit";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
 import { applyDiagnostics, clearPendingDecorations, errorMarkers, disposeDoc, getDoc, isDirty, openDoc, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
@@ -35,6 +38,7 @@ export function App() {
   const [dark, setDark] = useState(true);
   const [agentOpen, setAgentOpen] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [inline, setInline] = useState<{ ctx: InlineContext; busy: boolean; done: string | null } | null>(null);
   const [cursor, setCursor] = useState<[number, number]>([1, 1]);
   const [counts, setCounts] = useState<Record<string, [number, number]>>({});
   const [servers, setServers] = useState<Partial<Record<ServerKey, ServerStatus>>>({});
@@ -229,6 +233,23 @@ export function App() {
     [chooseFolder, save, closeTab, tabs.active],
   );
 
+  async function runInline(instruction: string) {
+    if (!inline || !services) return;
+    const { ctx } = inline;
+    setInline({ ctx, busy: true, done: null });
+    try {
+      const st = loadSettings();
+      const reply = await completeOnce({ ...st, apiKey: await loadApiKey(st.provider) }, services, buildInlinePrompt(ctx, instruction));
+      const replacement = extractReplacement(reply);
+      if (replacement.trim() === "" && ctx.start === ctx.end) throw new Error("the model returned nothing to insert");
+      const out = await services.pending.propose(ctx.path, spliceSelection(ctx.text, ctx.start, ctx.end, replacement), `Inline edit: ${instruction}`);
+      setInline({ ctx, busy: false, done: out.status === "pending" ? "Proposed: review it from the pending-changes banner." : `Done (${out.status}).` });
+    } catch (e) {
+      setNotice(`Inline edit failed: ${e instanceof Error ? e.message : String(e)}`);
+      setInline(null);
+    }
+  }
+
   function toggleTerminal() {
     setTerminalEverOpened(true);
     setTerminalOpen((o) => !o);
@@ -285,6 +306,33 @@ export function App() {
         <section className="flex min-w-0 flex-1 flex-col">
           <TabBar state={tabs} onActivate={(p) => dispatch({ type: "activate", path: p })} onClose={(p) => void closeTab(p)} />
           {notice && <div className="bg-red-900/40 px-3 py-1 text-sm" role="alert">{notice}</div>}
+          {inline && (
+            <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1 text-sm" data-testid="inline-edit">
+              <span className="shrink-0 text-[var(--muted)]">{inline.ctx.start === inline.ctx.end ? "Insert at cursor:" : "Edit selection:"}</span>
+              {inline.done ? (
+                <>
+                  <span data-testid="inline-done">{inline.done}</span>
+                  <button className="ml-auto underline" onClick={() => setInline(null)}>Close</button>
+                </>
+              ) : (
+                <>
+                  <input
+                    autoFocus
+                    className="min-w-0 flex-1 rounded bg-neutral-900 px-2 py-0.5"
+                    data-testid="inline-instruction"
+                    aria-label="Describe the change"
+                    placeholder="Describe the change, then Enter (Esc to cancel)"
+                    disabled={inline.busy}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setInline(null);
+                      if (e.key === "Enter" && e.currentTarget.value.trim() && !inline.busy) void runInline(e.currentTarget.value.trim());
+                    }}
+                  />
+                  {inline.busy && <span className="text-[var(--muted)]">Working…</span>}
+                </>
+              )}
+            </div>
+          )}
           {view === "review" && services && (
             <div className="min-h-0 flex-1">
               <ReviewPane
@@ -340,6 +388,12 @@ export function App() {
                 lspTimers.current.set(path, setTimeout(() => { const { version, text } = snapshot(); void lsp.current.change(path, language, version, text); }, 200));
               }}
               onCursor={(l, c) => setCursor([l, c])}
+              onInlineEdit={(ctx) => {
+                const d = getDoc(ctx.path);
+                if (d && isDirty(d)) return setNotice("Save the file first (Ctrl+S): inline edits are proposed against the saved version.");
+                setNotice(null);
+                setInline({ ctx, busy: false, done: null });
+              }}
             />
           </div>
           {terminalEverOpened && (

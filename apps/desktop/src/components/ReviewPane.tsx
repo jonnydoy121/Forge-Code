@@ -122,7 +122,7 @@ function ConflictView({ file, onResolve }: { file: PendingFile; onResolve: (text
   const [text, setText] = useState(file.conflict!.merged);
   return (
     <div className="space-y-2 p-3 text-xs" data-testid="conflict">
-      <p className="text-amber-400">You changed this file after the agent proposed its edit. Forge did not overwrite your changes. Resolve the conflict below.</p>
+      <p className="text-amber-400">You changed this file after the agent proposed its edit. Forge-Code did not overwrite your changes. Resolve the conflict below.</p>
       {file.conflict!.conflicts.map((c, i) => (
         <div key={i} className="grid grid-cols-3 gap-2">
           {[["Base", c.base], ["Yours (disk)", c.ours], ["Agent", c.theirs]].map(([label, lines]) => (

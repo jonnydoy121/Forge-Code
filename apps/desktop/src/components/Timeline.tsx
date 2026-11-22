@@ -41,7 +41,7 @@ export function Timeline({ services, version, onRestoreConversation, onFilesChan
     const staged = (await git(services.root, ["diff", "--cached"])).stdout;
     const status = (await git(services.root, ["status", "--porcelain"])).stdout;
     if (!status.trim()) return setMsg("Nothing to commit.");
-    setCommit((await draftCommitMessage(`${status}\n${staged}\n${diff}`.slice(0, 20_000))) ?? "Update from Forge agent");
+    setCommit((await draftCommitMessage(`${status}\n${staged}\n${diff}`.slice(0, 20_000))) ?? "Update from Forge-Code agent");
   };
 
   return (

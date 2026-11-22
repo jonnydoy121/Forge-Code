@@ -159,7 +159,7 @@ function DocsTab({ services, version }: { services: WorkspaceServices; version: 
 
   return (
     <div className="space-y-3">
-      <p className="text-[var(--muted)]">Add library documentation by URL; Forge indexes it locally so <code>@docs:name</code> retrieves current API references instead of relying on model memory. Fetching sends one request to the URL you enter.</p>
+      <p className="text-[var(--muted)]">Add library documentation by URL; Forge-Code indexes it locally so <code>@docs:name</code> retrieves current API references instead of relying on model memory. Fetching sends one request to the URL you enter.</p>
       <div className="flex gap-2">
         <input aria-label="Docs name" className="w-32 rounded bg-[var(--hover)] px-2 py-1" placeholder="react" value={name} onChange={(e) => setName(e.target.value)} />
         <input aria-label="Docs URL" className="flex-1 rounded bg-[var(--hover)] px-2 py-1" placeholder="https://react.dev/reference/react" value={url} onChange={(e) => setUrl(e.target.value)} />

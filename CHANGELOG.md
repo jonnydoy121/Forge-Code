@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Forge-Code branding, research and inline edit
+- Product name is now **Forge-Code** (window title, installer name, welcome screen, UI text, README). Technical identifiers are unchanged on purpose (`dev.forge.editor`, crate and binary names) so credential-store entries and installed data keep working.
+- Added `docs/RESEARCH.md`: competitor landscape (Cursor, Windsurf/Devin Desktop, Zed, Kiro, Cline, Aider, Continue) from vendor docs, a gap analysis and a ranked roadmap. Evidence is vendor-side only; independent reviews were not available.
+- Inline edit (research gap #1): select code (or place the cursor), press Alt+I or use the context menu, describe the change. A one-shot model call with no tools returns the replacement, which is proposed as a normal pending change (per-hunk review, nothing written until accepted). Refuses unsaved buffers. Unit tests plus an e2e in the real window.
 ### Live ACP agent (Claude Code via @agentclientprotocol/claude-agent-acp)
 - First run against a real external agent found that it starts in its own permissive mode ("auto", inherited from the user's Claude settings) and edited a file on disk without asking Forge. The ACP client now switches every session to the agent's ask-first mode ("default") when offered, so edits reach Forge's permission gate. Verified live: Forge was asked for Read (allowed) and Edit (refused), and the file stayed unchanged. Opt-in test: `FORGE_LIVE_ACP=1 npx vitest run packages/acp/test/live` (uses the developer's Claude account).
 - Fixed `spawnTransport` on Windows (`spawn EINVAL` for .cmd shims such as npx).

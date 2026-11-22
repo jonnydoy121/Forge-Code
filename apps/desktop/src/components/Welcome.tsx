@@ -39,7 +39,7 @@ export function Welcome({ onDone, onOpenFolder }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" role="dialog" aria-modal="true" aria-labelledby="welcome-title" data-testid="welcome">
       <div className="max-h-[90vh] w-[560px] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-6 text-sm shadow-2xl">
-        <h1 id="welcome-title" className="mb-2 text-xl font-semibold">Welcome to Forge</h1>
+        <h1 id="welcome-title" className="mb-2 text-xl font-semibold">Welcome to Forge-Code</h1>
         <p className="mb-4 text-[var(--muted)]">An editor where the AI agent researches, plans, edits and runs checks, while you stay in control: every change is a diff you can reject and roll back.</p>
         <fieldset className="mb-4">
           <legend className="mb-1 font-semibold">Where should the AI run?</legend>

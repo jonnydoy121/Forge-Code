@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Forge",
+  "productName": "Forge-Code",
   "version": "0.0.0",
   "identifier": "dev.forge.editor",
   "build": {
@@ -9,6 +9,6 @@
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
-  "app": { "windows": [{ "label": "main", "title": "Forge", "width": 1200, "height": 800 }], "security": { "csp": null } },
+  "app": { "windows": [{ "label": "main", "title": "Forge-Code", "width": 1200, "height": 800 }], "security": { "csp": null } },
   "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.ico"], "externalBin": ["binaries/forge-runtime"] }
 }
