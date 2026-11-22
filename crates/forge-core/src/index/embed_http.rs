@@ -44,15 +44,23 @@ impl HttpEmbedder {
     }
 
     fn request(&self, text: &str) -> Result<Vec<f32>, String> {
+        self.request_batch(&[text.to_string()])?.into_iter().next().ok_or_else(|| "response has no embeddings".to_string())
+    }
+
+    /// One HTTP request for many inputs: Ollama's /api/embed accepts an array and returns one vector per entry, in order.
+    fn request_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
         let resp: serde_json::Value = self
             .agent
             .post(&self.url)
-            .send_json(serde_json::json!({ "model": self.model, "input": [text] }))
+            .send_json(serde_json::json!({ "model": self.model, "input": texts }))
             .map_err(|e| e.to_string())?
             .into_json()
             .map_err(|e| e.to_string())?;
-        let first = resp["embeddings"].get(0).and_then(|v| v.as_array()).ok_or("response has no embeddings")?;
-        Ok(normalise(first.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect()))
+        let all = resp["embeddings"].as_array().ok_or("response has no embeddings")?;
+        if all.len() != texts.len() {
+            return Err(format!("asked for {} embeddings, got {}", texts.len(), all.len()));
+        }
+        Ok(all.iter().map(|v| normalise(v.as_array().map(|a| a.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect()).unwrap_or_default())).collect())
     }
 }
 
@@ -60,6 +68,22 @@ impl Embedder for HttpEmbedder {
     fn dim(&self) -> usize {
         self.dim
     }
+    /// Sends up to BATCH texts per request. A group that fails is retried one by one, so a single bad chunk cannot
+    /// zero out its neighbours; whatever still fails yields a zero vector.
+    fn embed_batch(&self, texts: &[String]) -> Vec<Vec<f32>> {
+        const BATCH: usize = 16;
+        let clip = |t: &String| t.chars().take(6000).collect::<String>();
+        let mut out = Vec::with_capacity(texts.len());
+        for group in texts.chunks(BATCH) {
+            let clipped: Vec<String> = group.iter().map(clip).collect();
+            match self.request_batch(&clipped) {
+                Ok(v) if v.iter().all(|x| x.len() == self.dim) => out.extend(v),
+                _ => out.extend(group.iter().map(|t| self.embed(t))),
+            }
+        }
+        out
+    }
+
     /// A failed request yields a zero vector (matches nothing) rather than failing the whole index.
     fn embed(&self, text: &str) -> Vec<f32> {
         match self.request(&text.chars().take(6000).collect::<String>()) {
@@ -74,11 +98,15 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
-    /// Tiny mock server: answers every POST with a fixed 3-d vector derived from whether the input mentions "auth".
-    fn mock() -> String {
+    /// Mock /api/embed: one vector per input ([3,4,0] when the text mentions "auth", else [0,0,2]). Counts requests.
+    fn mock() -> (String, Arc<AtomicUsize>) {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
         std::thread::spawn(move || {
             for s in l.incoming() {
                 let mut s = s.unwrap();
@@ -97,22 +125,52 @@ mod tests {
                         break;
                     }
                 }
-                let req = String::from_utf8_lossy(&data).to_string();
-                let v = if req.contains("auth") { "[3.0,4.0,0.0]" } else { "[0.0,0.0,2.0]" };
-                let body = format!("{{\"embeddings\":[{v}]}}");
-                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                counter.fetch_add(1, Ordering::SeqCst);
+                let text = String::from_utf8_lossy(&data).to_string();
+                let body: serde_json::Value = serde_json::from_str(text.split_once("\r\n\r\n").map_or("{}", |(_, b)| b)).unwrap_or_default();
+                let vectors: Vec<serde_json::Value> = body["input"]
+                    .as_array()
+                    .map(|a| a.iter().map(|t| if t.as_str().unwrap_or("").contains("auth") { serde_json::json!([3.0, 4.0, 0.0]) } else { serde_json::json!([0.0, 0.0, 2.0]) }).collect())
+                    .unwrap_or_default();
+                let out = serde_json::json!({ "embeddings": vectors }).to_string();
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len());
             }
         });
-        format!("http://127.0.0.1:{port}")
+        (format!("http://127.0.0.1:{port}"), requests)
     }
 
     #[test]
     fn learns_dimension_and_returns_unit_vectors() {
-        let e = HttpEmbedder::connect(&mock(), "m").unwrap();
+        let (url, _) = mock();
+        let e = HttpEmbedder::connect(&url, "m").unwrap();
         assert_eq!(e.dim(), 3);
         let v = e.embed("login auth flow");
         assert!((v[0] - 0.6).abs() < 1e-6 && (v[1] - 0.8).abs() < 1e-6, "{v:?}");
         assert_eq!(e.embed("other"), vec![0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_batch_is_one_request_per_sixteen_texts_and_keeps_order() {
+        let (url, requests) = mock();
+        let e = HttpEmbedder::connect(&url, "m").unwrap();
+        let before = requests.load(Ordering::SeqCst); // the connect probe
+        let texts: Vec<String> = (0..40).map(|i| if i % 2 == 0 { format!("auth {i}") } else { format!("other {i}") }).collect();
+        let vecs = e.embed_batch(&texts);
+        assert_eq!(vecs.len(), 40);
+        assert_eq!(requests.load(Ordering::SeqCst) - before, 3, "40 texts = 3 requests (16 + 16 + 8), not 40");
+        for (i, v) in vecs.iter().enumerate() {
+            let expect_auth = i % 2 == 0;
+            assert_eq!(v[0] > 0.5, expect_auth, "vector {i} is in the wrong position: {v:?}");
+        }
+    }
+
+    #[test]
+    fn an_empty_batch_makes_no_request() {
+        let (url, requests) = mock();
+        let e = HttpEmbedder::connect(&url, "m").unwrap();
+        let before = requests.load(Ordering::SeqCst);
+        assert!(e.embed_batch(&[]).is_empty());
+        assert_eq!(requests.load(Ordering::SeqCst), before);
     }
 
     #[test]
@@ -126,5 +184,6 @@ mod tests {
     fn an_outage_after_connect_degrades_to_zero_vectors() {
         let e = HttpEmbedder { url: "http://127.0.0.1:1/api/embed".into(), model: "m".into(), dim: 3, agent: ureq::AgentBuilder::new().timeout(Duration::from_secs(2)).build() };
         assert_eq!(e.embed("x"), vec![0.0; 3]);
+        assert_eq!(e.embed_batch(&["a".to_string(), "b".to_string()]), vec![vec![0.0; 3], vec![0.0; 3]]);
     }
 }

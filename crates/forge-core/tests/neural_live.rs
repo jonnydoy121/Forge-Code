@@ -64,3 +64,25 @@ fn the_lexical_embedder_cannot_do_the_same() {
     let hits = cases.iter().filter(|(q, want)| idx.semantic_search(q, 1).first().is_some_and(|h| h.file.ends_with(want))).count();
     println!("lexical embedder placed {hits} of 4 correctly");
 }
+
+#[test]
+#[ignore = "needs a running Ollama with nomic-embed-text"]
+fn batching_is_faster_than_one_request_per_chunk() {
+    let e = HttpEmbedder::connect("http://127.0.0.1:11434", "nomic-embed-text").expect("Ollama must be running");
+    let texts: Vec<String> = (0..64).map(|i| format!("src/file{i}.ts\nexport function handler{i}(req: Request) {{\n  return respond(req, {i});\n}}")).collect();
+    e.embed_batch(&texts[..4]); // warm the model so neither side pays the load
+    let t = std::time::Instant::now();
+    let single: Vec<Vec<f32>> = texts.iter().map(|x| e.embed(x)).collect();
+    let one_by_one = t.elapsed();
+    let t = std::time::Instant::now();
+    let batched = e.embed_batch(&texts);
+    let together = t.elapsed();
+    println!("64 chunks: one request each {one_by_one:?}, batched {together:?}");
+    assert_eq!(batched.len(), 64);
+    // Same vectors either way (to float noise), so batching changes speed, not results.
+    for (a, b) in single.iter().zip(&batched) {
+        let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+        assert!(dot > 0.99, "batched vector drifted from the single one: cosine {dot}");
+    }
+    assert!(together < one_by_one, "batching should be faster");
+}

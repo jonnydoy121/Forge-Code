@@ -7,6 +7,10 @@ pub const DIM: usize = 128;
 pub trait Embedder: Send + Sync {
     fn dim(&self) -> usize;
     fn embed(&self, text: &str) -> Vec<f32>;
+    /// Embed several texts at once. Backends with a network round trip per call override this to send them together.
+    fn embed_batch(&self, texts: &[String]) -> Vec<Vec<f32>> {
+        texts.iter().map(|t| self.embed(t)).collect()
+    }
 }
 
 pub struct HashEmbedder;

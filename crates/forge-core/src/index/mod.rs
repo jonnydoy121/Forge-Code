@@ -241,18 +241,24 @@ impl Index {
         let parsed = parse::parse(rel, &content);
         let cache: HashMap<&str, &Vec<f32>> = prev.map(|p| p.parsed.chunks.iter().zip(&p.vecs).map(|(c, v)| (c.hash.as_str(), v)).collect()).unwrap_or_default();
         let lines: Vec<&str> = content.split('\n').collect();
-        let vecs = parsed
-            .chunks
-            .iter()
-            .map(|c: &ChunkMeta| {
-                if let Some(v) = cache.get(c.hash.as_str()) {
-                    return (*v).clone();
-                }
-                self.embed_calls.fetch_add(1, Ordering::Relaxed);
-                let body = lines[(c.start as usize - 1)..(c.end as usize).min(lines.len())].join("\n");
-                self.embedder.embed(&format!("{rel}\n{body}"))
-            })
-            .collect();
+        // Reuse embeddings of unchanged chunks; embed all the new ones together (one request for a network embedder).
+        let mut vecs: Vec<Option<Vec<f32>>> = parsed.chunks.iter().map(|c: &ChunkMeta| cache.get(c.hash.as_str()).map(|v| (*v).clone())).collect();
+        let todo: Vec<usize> = (0..vecs.len()).filter(|&i| vecs[i].is_none()).collect();
+        if !todo.is_empty() {
+            self.embed_calls.fetch_add(todo.len(), Ordering::Relaxed);
+            let texts: Vec<String> = todo
+                .iter()
+                .map(|&i| {
+                    let c: &ChunkMeta = &parsed.chunks[i];
+                    let body = lines[(c.start as usize - 1)..(c.end as usize).min(lines.len())].join("\n");
+                    format!("{rel}\n{body}")
+                })
+                .collect();
+            for (slot, v) in todo.iter().zip(self.embedder.embed_batch(&texts)) {
+                vecs[*slot] = Some(v);
+            }
+        }
+        let vecs: Vec<Vec<f32>> = vecs.into_iter().map(|v| v.unwrap_or_default()).collect();
         Some(FileEntry { hash, size, mtime, parsed, vecs })
     }
 
