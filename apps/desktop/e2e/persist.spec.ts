@@ -61,3 +61,29 @@ test("pending agent edits are still there, reviewable and acceptable, after a re
     srv.close();
   }
 });
+
+test("the agent loop runs in its own OS process, not in the UI", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "forge-e2e-proc-")).replace(/[\\]/g, "/");
+  writeFileSync(`${dir}/a.js`, "export const a = 1;\n");
+  const srv = createServer(async (req: IncomingMessage, res) => {
+    for await (const _ of req) void _;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(sse({ choices: [{ delta: { content: "hello from the model" } }] }));
+    res.write(sse({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }));
+    res.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const port = (srv.address() as AddressInfo).port;
+  try {
+    const page = await openWorkspace(dir);
+    await page.getByTestId("settings-toggle").click();
+    await page.getByTestId("base-url").fill(`http://127.0.0.1:${port}/v1`);
+    await page.getByTestId("settings-toggle").click();
+    await page.getByTestId("agent-input").fill("hi");
+    await page.getByTestId("agent-input").press("Enter");
+    await expect(page.getByTestId("assistant").last()).toContainText("hello from the model", { timeout: 20_000 });
+    await expect(page.getByTestId("runtime-kind")).toHaveText("agent: process");
+  } finally {
+    srv.close();
+  }
+});

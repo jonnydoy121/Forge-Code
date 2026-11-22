@@ -27,6 +27,10 @@ export interface AgentRuntime {
   setHistory(history: Message[]): void;
   addCost(usd: number): void;
   setModel(provider: string, model: string): void;
+  /** Where the loop runs: "process", "worker" or "inline". */
+  transport?: string;
+  /** Release the worker or process. */
+  terminate?(): void;
 }
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
@@ -253,6 +257,7 @@ export class RuntimeClient implements AgentRuntime {
   costUsd = 0;
   summaries: string[] = [];
   running = false;
+  transport = "worker";
   private lastMeter: RuntimeSnapshot["meter"] = { total: 0, entries: [], ratio: 1, calibrated: false, lastReported: 0 };
   private nextRid = 1;
   private nextCid = 1;

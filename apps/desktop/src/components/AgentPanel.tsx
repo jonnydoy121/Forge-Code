@@ -91,6 +91,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const planRef = useRef<string | null>(null);
   const pendingHistory = useRef<Message[] | null>(null);
   const [cost, setCost] = useState(0);
+  const [runtimeKind, setRuntimeKind] = useState("");
   const [auditTick, setAuditTick] = useState(0);
   const [auditFilter, setAuditFilter] = useState<"all" | "network" | "command" | "file" | "blocked">("all");
   const [showAudit, setShowAudit] = useState(false);
@@ -253,6 +254,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         });
       }
       const rt = runtime.current;
+      setRuntimeKind(rt.transport ?? "");
       if (pendingHistory.current) {
         rt.setHistory([...rt.history, ...pendingHistory.current]);
         pendingHistory.current = null;
@@ -610,6 +612,7 @@ ${diff}`);
         <div className="mt-1 flex items-center gap-3 text-xs text-[var(--muted)]">
           <span data-testid="token-meter" title={breakdown}>{meter ? `${meter.total.toLocaleString()} tokens${meter.calibrated ? "" : " (est.)"}` : "0 tokens"}</span>
           <span data-testid="cost">${cost.toFixed(4)}</span>
+          {runtimeKind && <span data-testid="runtime-kind" title="Where the agent loop runs">agent: {runtimeKind}</span>}
           {busy && <button className="ml-auto underline" onClick={() => abort.current?.abort()}>Stop</button>}
         </div>
       </footer>

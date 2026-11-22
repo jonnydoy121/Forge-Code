@@ -12,7 +12,8 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test:rust": "cargo test --workspace",
-    "dev": "npm run tauri dev -w apps/desktop",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "dev": "npm run build:sidecar && npm run tauri dev -w apps/desktop",
     "build": "npm run build -w apps/desktop",
     "e2e": "npm run e2e -w apps/desktop"
   },

@@ -7,7 +7,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     // Node scripts that stand in for external servers and agents in tests.
-    files: ["**/fixtures/**/*.mjs"],
+    files: ["**/fixtures/**/*.mjs", "scripts/**/*.mjs"],
     languageOptions: { globals: { process: "readonly", console: "readonly", setTimeout: "readonly" } },
   },
 );

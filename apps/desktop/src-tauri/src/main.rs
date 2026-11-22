@@ -126,6 +126,15 @@ fn bg_list(state: tauri::State<forge_core::bg::Background>) -> Vec<forge_core::b
     state.list()
 }
 
+/// Path of the bundled agent-runtime executable (installed beside the app; in dev Tauri copies it next to the debug exe).
+#[tauri::command]
+fn runtime_sidecar_path() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let name = if cfg!(windows) { "forge-runtime.exe" } else { "forge-runtime" };
+    let p = exe.parent()?.join(name);
+    p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn secret_set(name: String, value: String) -> Result<(), String> {
     forge_core::secrets::set(&name, &value)
@@ -171,6 +180,7 @@ fn main() {
             list_names,
             git_run,
             home_dir,
+            runtime_sidecar_path,
             secret_set,
             secret_get,
             secret_delete,
