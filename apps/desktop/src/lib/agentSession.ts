@@ -3,6 +3,7 @@ import { Runtime, createSubAgentTool, type ContextSection } from "@forge/agent-r
 import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
 import { modePrompt } from "@forge/plans";
+import { RuntimeClient, type AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
 import type { WorkspaceServices } from "./workspace";
@@ -58,24 +59,44 @@ export async function createSession(opts: {
       ...services.commandTools({ sandbox: settings.sandbox, toolchainRead: settings.toolchainRead }),
       ...services.mcp.tools(),
       ...services.contextTools.filter((t) => t.spec.name === "remember"),
-      createSubAgentTool({ make: makeSub, onCost: (usd) => void (runtime.costUsd += usd) }),
+      createSubAgentTool({ make: makeSub, onCost: (usd) => runtime.addCost(usd) }),
     ],
   });
-  const runtime = new Runtime({
-    gateway,
-    tools,
-    provider: "default",
-    model: settings.model,
-    sections: opts.sections,
-    modePrompt,
-    gate: services.gate,
-    verify: services.verifyDeps,
-    hooks: services.hooks,
-    budgetTokens: settings.budgetTokens,
-    compaction: { threshold: settings.compactionThreshold },
-    limits: { maxSteps: settings.maxSteps, maxCostUsd: settings.maxCostUsd, maxSeconds: settings.maxSeconds },
-    audit: audit("tool"),
-  });
+  const limits = { maxSteps: settings.maxSteps, maxCostUsd: settings.maxCostUsd, maxSeconds: settings.maxSeconds };
+  const auditEntry = audit("tool");
+  // The agent loop runs in a Web Worker so context assembly, compaction and redaction never block typing. Everything
+  // that needs Tauri IPC (files, HTTP, permissions, indexing) stays here and is served to the worker over messages.
+  const runtime: AgentRuntime =
+    typeof Worker !== "undefined"
+      ? new RuntimeClient(
+          new Worker(new URL("./runtime.worker.ts", import.meta.url), { type: "module" }) as never,
+          {
+            gateway,
+            tools,
+            gate: services.gate,
+            hooks: services.hooks,
+            sections: opts.sections,
+            modePrompt,
+            verify: services.verifyDeps,
+            audit: auditEntry,
+          },
+          { provider: "default", model: settings.model, budgetTokens: settings.budgetTokens, compaction: { threshold: settings.compactionThreshold }, limits },
+        )
+      : (new Runtime({
+          gateway,
+          tools,
+          provider: "default",
+          model: settings.model,
+          sections: opts.sections,
+          modePrompt,
+          gate: services.gate,
+          verify: services.verifyDeps,
+          hooks: services.hooks,
+          budgetTokens: settings.budgetTokens,
+          compaction: { threshold: settings.compactionThreshold },
+          limits,
+          audit: auditEntry,
+        }) as unknown as AgentRuntime);
   services.setRuntime(runtime);
   const started = await runtime.sessionStart().catch(() => null);
   if (started?.type === "hook") opts.onHook?.("SessionStart", started.output);

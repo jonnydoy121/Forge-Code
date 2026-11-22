@@ -133,8 +133,9 @@ test("a correction is offered as a memory (never saved silently), reaches later 
     await expect(page.getByTestId("assistant").last()).toContainText("noted", { timeout: 20_000 });
     expect(existsSync(`${dir}/.forge/memory`)).toBe(false); // offered, not saved
     await page.getByTestId("save-memory").click();
-    await expect.poll(() => (existsSync(`${dir}/.forge/memory`) ? readdirSync(`${dir}/.forge/memory`).length : 0)).toBe(1);
-    expect(readFileSync(`${dir}/.forge/memory/${readdirSync(`${dir}/.forge/memory`)[0]}`, "utf8")).toContain("always use async/await here");
+    const saved = () => (existsSync(`${dir}/.forge/memory`) ? readdirSync(`${dir}/.forge/memory`).filter((f) => f.endsWith(".md")) : []);
+    await expect.poll(() => saved().length).toBe(1); // ignore the atomic-write temp file
+    expect(readFileSync(`${dir}/.forge/memory/${saved()[0]}`, "utf8")).toContain("always use async/await here");
 
     await send(page, "describe the server api module");
     await expect.poll(() => requests.length).toBe(2);

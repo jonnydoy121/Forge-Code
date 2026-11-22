@@ -123,6 +123,15 @@ ${summary}` });
     this.deps.model = model;
   }
 
+  /** Replace the conversation (restore to a checkpoint, resume a saved session). */
+  setHistory(history: Message[]) {
+    this.history = history;
+  }
+
+  addCost(usd: number) {
+    this.costUsd += usd;
+  }
+
   /** Fire SessionStart hooks; their output is shown to the developer and added to the conversation. */
   async sessionStart(): Promise<AgentEvent | null> {
     if (!this.deps.hooks) return null;

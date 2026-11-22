@@ -25,7 +25,8 @@ import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/pla
 import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts } from "@forge/context-store";
 import { loadSettings } from "./settings";
 import { fetchText as rawFetchText, pickFetch } from "./http";
-import type { Runtime, VerifyDeps } from "@forge/agent-runtime";
+import type { VerifyDeps } from "@forge/agent-runtime";
+import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexBackend } from "./ipc";
 
@@ -107,7 +108,7 @@ export interface WorkspaceServices {
   verifyDeps: VerifyDeps;
   hooks: HookRunner;
   gate: ReturnType<typeof createPermissionGate>;
-  setRuntime(rt: Runtime | null): void;
+  setRuntime(rt: AgentRuntime | null): void;
   commands(): Promise<ProjectCommands>;
   /** Run checks on demand ("Run checks" button). */
   runVerification(phase: "fast" | "full"): Promise<VerificationReport>;
@@ -183,7 +184,7 @@ export async function createWorkspaceServices(opts: {
   const sessionId = sessionIdFor(root);
   const checkpoints = new FileCheckpointStore({ fs: diskFs, dir: `${root}/.forge/checkpoints/${sessionId}` });
   const rel = (p: string) => (p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
-  let runtime: Runtime | null = null;
+  let runtime: AgentRuntime | null = null;
   let seq = 0;
 
   const hooksText = await diskFs.read(`${root}/.forge/hooks.json`);

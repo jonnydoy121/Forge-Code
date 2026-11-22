@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Mode } from "@forge/protocol";
 import type { Message } from "@forge/protocol";
-import type { Runtime, MeterEntry, ContextSection } from "@forge/agent-runtime";
+import type { MeterEntry, ContextSection } from "@forge/agent-runtime";
+import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { createSession } from "../lib/agentSession";
 import { fsApi, indexBackend } from "../lib/ipc";
 import { attachmentKey, attachmentLabel, resolveAttachment, type Attachment } from "../lib/attachments";
@@ -96,7 +97,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [external, setExternal] = useState<string | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
   const [suggest, setSuggest] = useState<string | null>(null);
-  const runtime = useRef<Runtime | null>(null);
+  const runtime = useRef<AgentRuntime | null>(null);
   const abort = useRef<AbortController | null>(null);
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
@@ -253,7 +254,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
       }
       const rt = runtime.current;
       if (pendingHistory.current) {
-        rt.history.push(...pendingHistory.current);
+        rt.setHistory([...rt.history, ...pendingHistory.current]);
         pendingHistory.current = null;
       }
       abort.current = new AbortController();
@@ -443,7 +444,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             version={version}
             onFilesChanged={onFilesChanged}
             onRestoreConversation={(n) => {
-              if (runtime.current) runtime.current.history.length = Math.min(n, runtime.current.history.length);
+              if (runtime.current) runtime.current.setHistory(runtime.current.history.slice(0, n));
               setItems((i) => [...i, { kind: "notice", text: `Conversation restored to ${n} messages.` }]);
             }}
             draftCommitMessage={async (diff) => {

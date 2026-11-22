@@ -71,3 +71,6 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 
 ## Status
 Phases 0-9 built. API keys are kept in the OS credential store (verified against Windows Credential Manager). Not verified: CI and packaging on macOS/Linux, real external agents, screen-reader testing by a human. See CHANGELOG.md.
+
+## Agent loop worker
+The agent loop runs in a Web Worker (`packages/agent-runtime/src/remote.ts`, `apps/desktop/src/lib/runtime.worker.ts`). The worker owns the loop; the main thread serves tools, the permission gate, context sections, hooks, verification and model streaming over typed messages (`RuntimeClient` mirrors history/cost/meter). Cost and history updates are separate messages so a mid-run sub-agent cost can never overwrite the live conversation.
