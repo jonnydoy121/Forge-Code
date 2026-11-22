@@ -478,12 +478,12 @@ export async function createWorkspaceServices(opts: {
     rules,
     memories,
     prompts: () => loadPrompts(diskFs, `${root}/.forge/prompts`),
-    skills: () => loadSkills(diskFs, `${root}/.forge/skills`),
+    skills: () => loadSkills(diskFs, `${root}/.forge/skills`, home ? `${norm(home)}/.forge/skills` : undefined),
     skillTools: (st) =>
       createSkillTools({
         root,
         fs: diskFs,
-        skills: () => loadSkills(diskFs, `${root}/.forge/skills`),
+        skills: () => loadSkills(diskFs, `${root}/.forge/skills`, home ? `${norm(home)}/.forge/skills` : undefined),
         exec: tauriExec,
         sandbox: () => st.sandbox,
         toolchainRead: () => st.toolchainRead,

@@ -164,3 +164,22 @@ describe("skills in the CLI", () => {
     expect(gw.requests[0]!.tools!.map((x) => x.name)).not.toContain("use_skill");
   });
 });
+
+describe("user skills in the CLI", () => {
+  it("includes skills from HOME/.forge/skills, and a repo skill overrides a personal one of the same name", async () => {
+    const dir = project();
+    const home = mkdtempSync(join(tmpdir(), "forge-cli-home-")).replace(/[\\]/g, "/");
+    mkdirSync(`${home}/.forge/skills/standup`, { recursive: true });
+    writeFileSync(`${home}/.forge/skills/standup/SKILL.md`, "---\ndescription: Write my standup\n---\nSummarise yesterday.");
+    mkdirSync(`${home}/.forge/skills/release`, { recursive: true });
+    writeFileSync(`${home}/.forge/skills/release/SKILL.md`, "---\ndescription: PERSONAL release\n---\nmine");
+    mkdirSync(`${dir}/.forge/skills/release`, { recursive: true });
+    writeFileSync(`${dir}/.forge/skills/release/SKILL.md`, "---\ndescription: REPO release\n---\nrepo's");
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    await runCli(["ask", "hi"], io(dir, gw, { HOME: home }).i);
+    const sent = JSON.stringify(gw.requests[0]);
+    expect(sent).toContain("standup: Write my standup");
+    expect(sent).toContain("release: REPO release");
+    expect(sent).not.toContain("PERSONAL release");
+  });
+});

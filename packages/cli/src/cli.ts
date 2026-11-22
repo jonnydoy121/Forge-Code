@@ -157,8 +157,10 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
   };
   // Skills (.forge/skills): instructions only. The CLI has no OS sandbox, so bundled scripts are never offered here.
   const skillFs = { read: promptFs.read, list: promptFs.list };
-  const skills = await loadSkills(skillFs, `${root}/.forge/skills`);
-  const skillTools = skills.length ? createSkillTools({ root, fs: skillFs, skills: () => loadSkills(skillFs, `${root}/.forge/skills`) }) : [];
+  const home = (io.env.HOME ?? io.env.USERPROFILE)?.replace(/[\\]/g, "/").replace(/\/+$/, "");
+  const userSkills = home ? `${home}/.forge/skills` : undefined;
+  const skills = await loadSkills(skillFs, `${root}/.forge/skills`, userSkills);
+  const skillTools = skills.length ? createSkillTools({ root, fs: skillFs, skills: () => loadSkills(skillFs, `${root}/.forge/skills`, userSkills) }) : [];
   const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...skillTools, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : [])] : [...READ_TOOLS, ...skillTools] });
   const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 },
     sections: skills.length ? () => [{ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) }] : undefined,

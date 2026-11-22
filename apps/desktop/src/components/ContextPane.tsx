@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RuleEngine, type AppliedRule, type DocSet, type LintWarning, type Memory } from "@forge/context-store";
+import { RuleEngine, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
 import type { WorkspaceServices } from "../lib/workspace";
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "rules" | "memory" | "docs" | "connections";
+type Tab = "rules" | "memory" | "skills" | "docs" | "connections";
 
 export function ContextPane({ services, version, activeFile, onOpenFile, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("rules");
@@ -20,9 +20,9 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
       <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-sm">
         <strong>Context</strong>
         <div className="flex gap-3" role="tablist" aria-label="Context sections">
-          {(["rules", "memory", "docs", "connections"] as Tab[]).map((t) => (
+          {(["rules", "memory", "skills", "docs", "connections"] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} data-testid={`ctx-tab-${t}`} className={tab === t ? "underline" : "text-[var(--muted)]"} onClick={() => setTab(t)}>
-              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "docs" ? "Docs" : "Connections"}
+              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "skills" ? "Skills" : t === "docs" ? "Docs" : "Connections"}
             </button>
           ))}
         </div>
@@ -31,6 +31,7 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
       <div className="min-h-0 flex-1 overflow-auto p-4 text-sm">
         {tab === "rules" && <RulesTab services={services} version={version} activeFile={activeFile} onOpenFile={onOpenFile} />}
         {tab === "memory" && <MemoryTab services={services} version={version} />}
+        {tab === "skills" && <SkillsTab services={services} version={version} onOpenFile={onOpenFile} />}
         {tab === "docs" && <DocsTab services={services} version={version} />}
         {tab === "connections" && <ConnectionsTab services={services} />}
       </div>
@@ -85,6 +86,54 @@ function RulesTab({ services, version, activeFile, onOpenFile }: Omit<Props, "on
       </div>
       {msg && <div role="status" data-testid="rules-msg">{msg}</div>}
       <div className="text-xs text-[var(--muted)]">{RuleEngine.name} reads AGENTS.md, CLAUDE.md, .cursorrules, .cursor/rules, .windsurfrules, .github/copilot-instructions.md, nested AGENTS.md and .forge/rules/*.md.</div>
+    </div>
+  );
+}
+
+function SkillsTab({ services, version, onOpenFile }: { services: WorkspaceServices; version: number; onOpenFile: (path: string) => void }) {
+  const [list, setList] = useState<Skill[] | null>(null);
+  useEffect(() => {
+    void services.skills().then(setList).catch(() => setList([]));
+  }, [services, version]);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[var(--muted)]">
+        A skill is a folder with a SKILL.md, in <code>.forge/skills/&lt;name&gt;/</code> in this repository (you can commit them) or in your own <code>~/.forge/skills</code>. The agent loads one when a task calls for it. A skill can bundle scripts
+        (.js .mjs .cjs .py .sh); you are asked before each one runs, and it runs in the OS sandbox when that is on. Scripts are code, so only use skills from repositories you trust.
+      </p>
+      {list === null ? null : list.length === 0 ? (
+        <p data-testid="skills-empty">No skills yet. Create <code>.forge/skills/my-skill/SKILL.md</code> with a <code>description:</code> line and instructions.</p>
+      ) : (
+        <ul className="space-y-2" aria-label="Skills">
+          {list.map((s) => (
+            <li key={`${s.source}:${s.name}`} className="rounded border border-[var(--border)] p-2" data-testid="skill" data-skill={s.name}>
+              <div className="flex items-center gap-2">
+                <strong>{s.name}</strong>
+                <span className="rounded bg-[var(--hover)] px-1 text-xs" data-testid="skill-source">{s.source === "project" ? "this repo" : "personal"}</span>
+                <button className="ml-auto underline" onClick={() => onOpenFile(`${s.dir}/SKILL.md`)}>Open SKILL.md</button>
+              </div>
+              <div className="text-[var(--muted)]">{s.description}</div>
+              {s.scripts.length > 0 && (
+                <div className="mt-1" data-testid="skill-scripts">
+                  Scripts:{" "}
+                  {s.scripts.map((f) => (
+                    <code key={f} className="mr-2" title={s.declared[f]?.description}>
+                      {f}
+                      {s.declared[f] ? " (typed)" : ""}
+                    </code>
+                  ))}
+                </div>
+              )}
+              {s.problems.length > 0 && (
+                <div className="mt-1 text-amber-400" role="alert" data-testid="skill-problems">
+                  tools.json: {s.problems.join("; ")}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -75,7 +75,9 @@ describe("use_skill", () => {
     const out = (await tools({ exec: { run: async () => ({ code: 0, stdout: "", stderr: "", timedOut: false }) } }).byName("use_skill").run({ name: "release" }, ctx)) as string;
     expect(out).toContain("# Skill: release");
     expect(out).toContain("Run the checks, then tag.");
-    expect(out).toContain("run_skill_script): bump.js, notes.py");
+    expect(out).toContain("Bundled scripts (run with run_skill_script):");
+    expect(out).toContain("- bump.js");
+    expect(out).toContain("- notes.py");
     expect(out).toContain("CHECKLIST.md");
   });
 
@@ -173,7 +175,7 @@ describe("run_skill_script", () => {
   it("audits each run, saying whether it was sandboxed", async () => {
     const audit: { name: string; detail?: string }[] = [];
     await tools({ exec: ok, audit }).byName("run_skill_script").run({ skill: "release", script: "bump.js" }, ctx);
-    expect(audit.map((a) => `${a.name}: ${a.detail}`)).toEqual(["skill release/bump.js: sandboxed", "skill release/bump.js: exit 0"]);
+    expect(audit.map((a) => `${a.name}: ${a.detail}`)).toEqual(["skill release/bump.js: project skill, sandboxed", "skill release/bump.js: exit 0"]);
   });
 
   it("tells the model which isolation was used and why a tool might be missing", async () => {
@@ -185,5 +187,101 @@ describe("run_skill_script", () => {
     expect((await envOnly.byName("run_skill_script").run({ skill: "release", script: "bump.js" }, ctx)) as string).toContain("no OS sandbox was available");
     const none = tools({ exec: { run: async () => ({ code: 0, stdout: "", stderr: "", timedOut: false }) } });
     expect((await none.byName("run_skill_script").run({ skill: "release", script: "bump.js" }, ctx)) as string).not.toContain("sandbox");
+  });
+});
+
+// ---- declared tool schemas, per-user skills ------------------------------------------------------------------------
+
+const BUMP_DECL = JSON.stringify({
+  "bump.js": {
+    description: "Bump the package version",
+    parameters: { type: "object", properties: { level: { type: "string", enum: ["patch", "minor", "major"], description: "how much to bump" }, count: { type: "integer", minimum: 1, maximum: 5 }, dry: { type: "boolean" } }, required: ["level"], additionalProperties: false },
+  },
+});
+
+describe("declared tool schemas (tools.json)", () => {
+  const withDecl = (decl: string) => ({ ...seed(), [`${SK}/release/tools.json`]: decl });
+  const ok: SkillExec = { run: async () => ({ code: 0, stdout: "bumped", stderr: "", timedOut: false }) };
+
+  it("reads declarations, keeps tools.json out of the reference files, and shows the usage to the model", async () => {
+    const [release] = (await loadSkills(memfs(withDecl(BUMP_DECL)), SK)).filter((s) => s.name === "release");
+    expect(release!.declared["bump.js"]!.description).toBe("Bump the package version");
+    expect(release!.files).not.toContain("tools.json");
+    expect(release!.problems).toEqual([]);
+    const out = (await tools({ exec: ok, files: withDecl(BUMP_DECL) }).byName("use_skill").run({ name: "release" }, ctx)) as string;
+    expect(out).toContain("- bump.js: Bump the package version | args: level (string, required, one of patch|minor|major): how much to bump; count (integer); dry (boolean)");
+    expect(out).toContain("- notes.py"); // an undeclared script is still listed, without a usage
+  });
+
+  it("accepts arguments that match, and runs the script", async () => {
+    const t = tools({ exec: ok, files: withDecl(BUMP_DECL) });
+    expect(await t.byName("run_skill_script").run({ skill: "release", script: "bump.js", args: { level: "minor", count: 2, dry: true } }, ctx)).toContain("bumped");
+  });
+
+  it("rejects arguments that do not match, before anything runs, and says what was expected", async () => {
+    let ran = 0;
+    const t = tools({ exec: { run: async () => (ran++, { code: 0, stdout: "", stderr: "", timedOut: false }) }, files: withDecl(BUMP_DECL) });
+    const run = (args: unknown) => t.byName("run_skill_script").run({ skill: "release", script: "bump.js", args }, ctx);
+    await expect(run({})).rejects.toThrow('missing required argument "level"');
+    await expect(run({ level: "huge" })).rejects.toThrow("must be one of: patch, minor, major");
+    await expect(run({ level: 3 })).rejects.toThrow('argument "level" must be a string');
+    await expect(run({ level: "patch", count: 1.5 })).rejects.toThrow('"count" must be an integer');
+    await expect(run({ level: "patch", count: 9 })).rejects.toThrow("at most 5");
+    await expect(run({ level: "patch", surprise: true })).rejects.toThrow('unknown argument "surprise"');
+    await expect(run({})).rejects.toThrow("Expected: level (string, required");
+    expect(ran).toBe(0);
+  });
+
+  it("scripts without a declaration still accept any arguments", async () => {
+    const t = tools({ exec: ok, files: withDecl(BUMP_DECL) });
+    expect(await t.byName("run_skill_script").run({ skill: "release", script: "notes.py", args: { anything: [1, 2] } }, ctx)).toContain("exit code 0");
+  });
+
+  it("reports a broken tools.json instead of ignoring it, and does not enforce what it could not read", async () => {
+    for (const bad of ["{not json", "[1,2]", JSON.stringify({ "ghost.js": { description: "x" } }), JSON.stringify({ "bump.js": { parameters: { type: "banana" } } })]) {
+      const files = withDecl(bad);
+      const [release] = (await loadSkills(memfs(files), SK)).filter((s) => s.name === "release");
+      expect(release!.problems.length, bad).toBeGreaterThan(0);
+      expect(release!.declared["bump.js"], bad).toBeUndefined();
+      const out = (await tools({ exec: ok, files }).byName("use_skill").run({ name: "release" }, ctx)) as string;
+      expect(out).toContain("tools.json has problems");
+    }
+  });
+});
+
+describe("per-user skills", () => {
+  const USER = "/home/me/.forge/skills";
+  const all = () => ({
+    ...seed(),
+    [`${USER}/standup/SKILL.md`]: "---\ndescription: Write my standup\n---\nSummarise yesterday.",
+    [`${USER}/standup/run.js`]: "x",
+    [`${USER}/release/SKILL.md`]: "# Mine\nmy own release flow",
+  });
+
+  it("loads skills from both folders and marks where each came from", async () => {
+    const skills = await loadSkills(memfs(all()), SK, USER);
+    expect(skills.map((s) => `${s.name}:${s.source}`)).toEqual(["lint-fix:project", "release:project", "standup:user"]);
+    expect(skills.find((s) => s.name === "standup")!.dir).toBe(`${USER}/standup`);
+  });
+
+  it("a repository skill wins over a user skill of the same name", async () => {
+    const release = (await loadSkills(memfs(all()), SK, USER)).filter((s) => s.name === "release");
+    expect(release).toHaveLength(1);
+    expect(release[0]!.source).toBe("project");
+    expect(release[0]!.body).toContain("Run the checks, then tag.");
+  });
+
+  it("works with no user folder at all", async () => {
+    expect((await loadSkills(memfs(seed()), SK, "/nowhere")).map((s) => s.name)).toEqual(["lint-fix", "release"]);
+  });
+
+  it("runs a user skill's script from its own folder and says in the audit that it is a user skill", async () => {
+    const fs = memfs(all());
+    const commands: string[] = [];
+    const audit: { name: string; detail?: string }[] = [];
+    const list = createSkillTools({ root: ROOT, fs, skills: () => loadSkills(fs, SK, USER), exec: { run: async (c) => (commands.push(c), { code: 0, stdout: "", stderr: "", timedOut: false }) }, audit: (e) => audit.push(e) });
+    await list.find((t) => t.spec.name === "run_skill_script")!.run({ skill: "standup", script: "run.js" }, ctx);
+    expect(commands[0]).toMatch(/^node "\/home\/me\/\.forge\/skills\/standup\/run\.js" "\/ws\/\.forge\/skill-runs\//);
+    expect(audit.some((a) => a.detail?.includes("user skill"))).toBe(true);
   });
 });

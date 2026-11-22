@@ -12,17 +12,26 @@ test.skip(!process.env.FORGE_CDP, "needs a running Forge window (FORGE_CDP)");
 
 const sse = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
 
-function skillWorkspace() {
+function skillWorkspace(opts: { typed?: boolean; broken?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "forge-e2e-skill-")).replace(/[\\]/g, "/");
   const sk = `${dir}/.forge/skills/greet`;
   mkdirSync(sk, { recursive: true });
   writeFileSync(`${sk}/SKILL.md`, "---\ndescription: Write a greeting file\n---\n# Greet\nRun greet.js with a name.\n");
   writeFileSync(`${sk}/greet.js`, "const fs = require('fs');\nconst args = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));\nfs.writeFileSync('greeting.txt', 'Hello, ' + args.name + '!');\nconsole.log('wrote greeting for ' + args.name);\n");
+  if (opts.typed) {
+    const decl = { "greet.js": { description: "Write greeting.txt for a person", parameters: { type: "object", properties: { name: { type: "string", maxLength: 40 } }, required: ["name"], additionalProperties: false } } };
+    writeFileSync(`${sk}/tools.json`, JSON.stringify(decl));
+  }
+  if (opts.broken) {
+    mkdirSync(`${dir}/.forge/skills/broken`, { recursive: true });
+    writeFileSync(`${dir}/.forge/skills/broken/SKILL.md`, "# Broken\nA skill whose tools.json is invalid.");
+    writeFileSync(`${dir}/.forge/skills/broken/tools.json`, "{not json");
+  }
   writeFileSync(`${dir}/a.js`, "export const a = 1;\n");
   return dir;
 }
 
-async function modelServer() {
+async function modelServer(scriptArgs: unknown = { name: "World" }) {
   const bodies: string[] = [];
   const srv = createServer(async (req: IncomingMessage, res) => {
     let body = "";
@@ -31,7 +40,7 @@ async function modelServer() {
     const toolMessages = (body.match(/"role":"tool"/g) ?? []).length;
     res.writeHead(200, { "content-type": "text/event-stream" });
     const tool = (name: string, args: unknown) => ({ tool_calls: [{ index: 0, id: `c${toolMessages}`, function: { name, arguments: JSON.stringify(args) } }] });
-    const delta = toolMessages === 0 ? tool("use_skill", { name: "greet" }) : toolMessages === 1 ? tool("run_skill_script", { skill: "greet", script: "greet.js", args: { name: "World" } }) : { content: "all done" };
+    const delta = toolMessages === 0 ? tool("use_skill", { name: "greet" }) : toolMessages === 1 ? tool("run_skill_script", { skill: "greet", script: "greet.js", args: scriptArgs }) : { content: "all done" };
     res.write(sse({ choices: [{ delta }] }));
     res.write(sse({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }));
     res.end("data: [DONE]\n\n");
@@ -107,6 +116,36 @@ test("declining the prompt means the script never runs", async () => {
     await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("deny").click();
     await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+    expect(existsSync(`${dir}/greeting.txt`)).toBe(false);
+  } finally {
+    srv.close();
+  }
+});
+
+test("the Skills panel lists skills, marks typed scripts, and surfaces a broken tools.json", async () => {
+  const dir = skillWorkspace({ typed: true, broken: true });
+  const page = await openWorkspace(dir);
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByTestId("ctx-tab-skills").click();
+  const greet = page.locator('[data-testid="skill"][data-skill="greet"]');
+  await expect(greet).toContainText("Write a greeting file");
+  await expect(greet.getByTestId("skill-source")).toHaveText("this repo");
+  await expect(greet.getByTestId("skill-scripts")).toContainText("greet.js (typed)");
+  const broken = page.locator('[data-testid="skill"][data-skill="broken"]');
+  await expect(broken.getByTestId("skill-problems")).toContainText("tools.json is not valid");
+  await expect(greet.getByTestId("skill-problems")).toHaveCount(0);
+});
+
+test("a typed script rejects wrong arguments from the model, and nothing runs", async () => {
+  const dir = skillWorkspace({ typed: true });
+  const { srv, port } = await modelServer({}); // the model forgets the required "name"
+  try {
+    const page = await openWorkspace(dir);
+    await start(page, port, { sandbox: false });
+    await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("allow-once").click();
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+    expect(await toolOutput(page)).toContain('missing required argument "name"');
     expect(existsSync(`${dir}/greeting.txt`)).toBe(false);
   } finally {
     srv.close();
