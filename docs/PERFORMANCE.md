@@ -58,6 +58,26 @@ the sets are merged. The dot product also uses eight independent accumulators so
 `.sum()` must add in order, which blocks SIMD. Tests prove the unrolled dot product matches the naive one at every length and
 that the bounded top-k equals the start of the full ranking.
 
+### Warm open of a 120,000-file repo (profiled, then fixed)
+The build now records where its time goes (`BuildStats.phases`), so this was measured rather than guessed. Profile of the old
+path: opening from SQLite 999 ms = row read 302 + JSON decode 239 + vector conversion 71 + inserting into the in-memory index 368;
+warm build 809 ms = import graph 394 + directory walk 175 + old Merkle tree 110 + new Merkle tree and diff 88.
+
+| | Before | After |
+|---|---|---|
+| Reopen from SQLite | 999 ms | 662 ms (-34%) |
+| Warm build (nothing changed) | 809 ms | 225 ms (-72%) |
+| **Total until "ready"** | **1,808 ms** | **887 ms (-51%)** |
+| Import graph + Merkle root | inside the build | about 410 ms, built after "ready" |
+
+What changed: (1) rows are still read one by one from SQLite, but JSON and vector decoding now run on every core, 4,096 rows
+at a time so the extra memory stays small, with the in-memory maps sized once; (2) when nothing needed hashing and the walk found
+exactly the files already known, the Merkle tree cannot have changed, so it is neither rebuilt nor diffed (the root is computed the
+first time something asks for it, or by `warm()`); (3) the import graph is built right after the app announces "ready" instead of
+inside the build, so it never delays that signal (the first repo map is still instant). A test covers unchanged, added, edited,
+deleted and "reopened from disk then unchanged", including that the Merkle root is non-empty, changes with the files, and
+matches after a restart. Timings on this machine drift by up to about 30% with background load, so quote ratios, not absolutes.
+
 ### Smaller fixes
 - The UI polled localStorage every second, forever, to notice a settings change. It now listens for a change event.
 
@@ -70,6 +90,10 @@ that the bounded top-k equals the start of the full ranking.
   grows mildly with conversation length (1.6 ms with an empty conversation, 2.2 ms after 60 exchanges, 2.6 ms after 120). Not worth
   the code. The streaming correctness test remains.
 
+- **SQLite memory-mapped reads** (`PRAGMA mmap_size`) made reopening roughly 15-20% faster, but SQLite documents that a mapped database
+  file being truncated underneath the process can crash it. For a gain that only shows at 100,000+ files, an editor crash if someone
+  clears the index folder is not worth it. Not adopted.
+
 ## Measured costs worth knowing
 - One idle agent-runtime process (one per agent thread): about 33 MB.
 - Real embedding model (nomic-embed-text via Ollama): batching 16 chunks per request is 1.7x faster than one request each.
@@ -78,5 +102,3 @@ that the bounded top-k equals the start of the full ranking.
 - **Trim Monaco to the features and languages Forge-Code uses.** Could shrink the 3.3 MB engine and its memory, but needs a
   careful feature audit to avoid regressions; no measurement yet says what is safe to drop.
 - **Share one agent-runtime process across threads.** Saves about 33 MB per extra thread; adds multiplexing complexity.
-- **Warm-open of very large repos (0.7 to 0.9 s for 120,000 files).** Not bound by the directory walk; a profile of the Merkle
-  and state-rebuild steps is the next step if this ever matters. Typical repositories open in milliseconds.

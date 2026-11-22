@@ -68,6 +68,9 @@ fn large_repo_meets_targets() {
     println!("semantic_search: {d_sem:?}");
     let (g, d_glob) = time(|| idx.grep("createProgram", Some("**/*.ts"), 50).unwrap());
     println!("grep with glob: {} hits in {d_glob:?}", g.len());
+    // The app builds the import graph and Merkle root right after announcing "ready"; do the same before timing the query.
+    let (_, d_warm) = time(|| idx.warm());
+    println!("graph + merkle root, after ready: {d_warm:?}");
     let (map, d_map) = time(|| idx.repo_map(&[], 2000));
     println!("repo_map: {} bytes in {d_map:?}", map.len());
 
@@ -101,6 +104,9 @@ export function forgePerfProbe() { return 1; }
     let (idx2, d_open) = time(|| Index::open(&root, &db.path().join("i.db")).unwrap());
     let (s3, d3) = time(|| idx2.build(&|_| {}).unwrap());
     println!("reopen from SQLite: {d_open:?}, warm build {d3:?}, reparsed {}", s3.reparsed);
+    let (_, d_graph) = time(|| idx2.warm());
+    println!("import graph (built after ready): {d_graph:?}");
+    println!("warm build phases: {}", s3.phases.iter().map(|(n, ms)| format!("{n} {ms} ms")).collect::<Vec<_>>().join(" | "));
 
     assert!(changed && found);
     assert!(d_inc < Duration::from_millis(500), "incremental reindex {d_inc:?}");

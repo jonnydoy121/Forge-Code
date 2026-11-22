@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
 /// Encode one LSP message with its Content-Length header.

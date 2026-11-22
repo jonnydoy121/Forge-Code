@@ -225,3 +225,52 @@ fn bounded_top_k_matches_the_start_of_the_full_ranking() {
         }
     }
 }
+
+#[test]
+fn the_unchanged_fast_path_never_misses_a_real_change_and_survives_a_restart() {
+    let repo = fixture();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("idx.db");
+    let idx = open(repo.path(), &db);
+    let first = idx.build(&|_| {}).unwrap();
+    assert!(first.reparsed > 5);
+    let before = idx.symbol("validatePassword");
+    let hit_before = idx.semantic_search("password login attempt", 1).first().map(|h| h.file.clone());
+    let root_before = idx.status().merkle_root;
+    assert!(!root_before.is_empty());
+
+    // Nothing changed: nothing is reprocessed, and the answers are the same.
+    let again = idx.build(&|_| {}).unwrap();
+    assert_eq!((again.reparsed, again.removed), (0, 0));
+    assert_eq!(format!("{:?}", idx.symbol("validatePassword")), format!("{before:?}"));
+
+    // A new file is noticed.
+    write(repo.path(), "src/added.ts", "export function brandNewThing() { return 1; }\n");
+    let added = idx.build(&|_| {}).unwrap();
+    assert_eq!(added.reparsed, 1);
+    assert_eq!(idx.symbol("brandNewThing").len(), 1);
+    assert_ne!(idx.status().merkle_root, root_before, "the root must change when a file is added");
+
+    // An edit is noticed and replaces the old symbols.
+    write(repo.path(), "src/added.ts", "export function renamedThing() { return 2; }\n");
+    assert_eq!(idx.build(&|_| {}).unwrap().reparsed, 1);
+    assert_eq!(idx.symbol("brandNewThing").len(), 0);
+    assert_eq!(idx.symbol("renamedThing").len(), 1);
+
+    // A deletion is noticed.
+    fs::remove_file(repo.path().join("src/added.ts")).unwrap();
+    let removed = idx.build(&|_| {}).unwrap();
+    assert_eq!(removed.removed, 1);
+    assert_eq!(idx.symbol("renamedThing").len(), 0);
+
+    // Restart: reopening loads everything back from disk (in parallel chunks); an unchanged repo is again a no-op and every
+    // answer is identical to before the restart.
+    drop(idx);
+    let reopened = open(repo.path(), &db);
+    assert_eq!(format!("{:?}", reopened.symbol("validatePassword")), format!("{before:?}"));
+    let after = reopened.build(&|_| {}).unwrap();
+    assert_eq!((after.reparsed, after.removed), (0, 0));
+    assert_eq!(reopened.status().merkle_root, root_before, "same files, same root, even though it was recomputed lazily after the restart");
+    assert_eq!(reopened.semantic_search("password login attempt", 1).first().map(|h| h.file.clone()), hit_before);
+    assert_eq!(reopened.symbol("renamedThing").len(), 0, "the deleted file stayed deleted across the restart");
+}

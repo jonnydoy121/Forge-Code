@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Warm open of huge repos
+- Profiled with new per-phase build timings (`BuildStats.phases`). Reopening a 120,000-file index 999 -> 662 ms (rows decoded on every core in bounded chunks, maps pre-sized); a warm build with nothing changed 809 -> 225 ms (the Merkle tree is no longer rebuilt and diffed when the file set and hashes are provably unchanged; the root is computed on demand); the import graph (about 410 ms) is built after "ready" instead of inside the build. Total until ready 1,808 -> 887 ms (-51%). Tests cover unchanged / added / edited / deleted / restart, including the Merkle root. Rejected after measuring: SQLite memory-mapped reads (faster, but a crash risk if the index file is truncated). Also removed three long-standing compiler warnings.
+
 ### Performance pass (measured; details and rejected ideas in docs/PERFORMANCE.md)
 - Startup JavaScript 3,971 KB -> 355 KB (-91%): the Monaco editor engine (3.3 MB) now loads on first file open and is warmed in the background after a workspace opens; the terminal (xterm.js) and the review, plan and context views load when first shown. Real release window, median of 5: DOM ready 153 -> 26 ms, first paint 216 -> 112 ms, shell mounted 278 -> 118 ms. Steady-state memory is essentially unchanged (380 -> 374 MB) because the editor loads moments after startup anyway.
 - Rust release profile (LTO, one codegen unit, stripped; panics still unwind): executable 36.4 -> 34.5 MB, and most index operations 10-15% faster.

@@ -69,6 +69,26 @@ pub struct BuildStats {
     pub removed: usize,
     pub embedded_chunks: usize,
     pub millis: u128,
+    /// where the time went, in order: (phase, milliseconds)
+    pub phases: Vec<(&'static str, u128)>,
+}
+
+/// Stopwatch that records how long each phase of a build took.
+struct Phases {
+    start: std::time::Instant,
+    last: u128,
+    out: Vec<(&'static str, u128)>,
+}
+
+impl Phases {
+    fn new() -> Self {
+        Phases { start: std::time::Instant::now(), last: 0, out: Vec::new() }
+    }
+    fn mark(&mut self, name: &'static str) {
+        let now = self.start.elapsed().as_millis();
+        self.out.push((name, now - self.last));
+        self.last = now;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -177,27 +197,48 @@ impl Index {
 
     fn load_from_db(&self) -> Result<(), Err> {
         let db = self.db.lock().unwrap();
-        let dim: Option<String> = db.query_row("SELECT value FROM meta WHERE key='dim'", [], |r| r.get(0)).ok();
-        if dim.as_deref() != Some(&self.embedder.dim().to_string()) {
+        let dim_key: Option<String> = db.query_row("SELECT value FROM meta WHERE key='dim'", [], |r| r.get(0)).ok();
+        if dim_key.as_deref() != Some(&self.embedder.dim().to_string()) {
             db.execute("DELETE FROM files", []).map_err(e)?;
             db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('dim', ?1)", params![self.embedder.dim().to_string()]).map_err(e)?;
             return Ok(());
         }
+        let dim = self.embedder.dim();
+        let total: usize = db.query_row("SELECT COUNT(*) FROM files", [], |r| r.get::<_, i64>(0)).map(|n| n as usize).unwrap_or(0);
         let mut stmt = db.prepare("SELECT path,hash,size,mtime,data,vecs FROM files").map_err(e)?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?, r.get::<_, Vec<u8>>(5)?)))
-            .map_err(e)?;
+        let mut rows = stmt.query([]).map_err(e)?;
         let mut st = self.state.write().unwrap();
-        for row in rows {
-            let (path, hash, size, mtime, data, vecs) = row.map_err(e)?;
-            let Ok(parsed) = serde_json::from_str::<Parsed>(&data) else { continue };
+        // Size the maps once instead of growing them row by row.
+        st.files.reserve(total);
+        st.defs.reserve(total * 4);
+        st.rev_refs.reserve(total);
+
+        type Raw = (String, String, i64, i64, String, Vec<u8>);
+        let decode = |(path, hash, size, mtime, data, vecs): Raw| -> Option<(String, FileEntry)> {
+            let parsed = serde_json::from_str::<Parsed>(&data).ok()?;
             let flat = from_bytes(&vecs);
-            let dim = self.embedder.dim();
             if flat.len() != parsed.chunks.len() * dim {
-                continue; // inconsistent row: will be re-indexed
+                return None; // inconsistent row: will be re-indexed
             }
             let vecs = flat.chunks(dim.max(1)).map(|c| c.to_vec()).collect();
-            Self::apply(&mut st, path, FileEntry { hash, size: size as u64, mtime: mtime as u64, parsed, vecs });
+            Some((path, FileEntry { hash, size: size as u64, mtime: mtime as u64, parsed, vecs }))
+        };
+        // SQLite hands rows over one after another, but decoding them (JSON, vectors) is independent work: read a chunk,
+        // decode it on every core, insert it. Chunking keeps the extra memory small.
+        const CHUNK: usize = 4096;
+        loop {
+            let mut raw: Vec<Raw> = Vec::with_capacity(CHUNK);
+            while raw.len() < CHUNK {
+                let Some(r) = rows.next().map_err(e)? else { break };
+                raw.push((r.get(0).map_err(e)?, r.get(1).map_err(e)?, r.get(2).map_err(e)?, r.get(3).map_err(e)?, r.get(4).map_err(e)?, r.get(5).map_err(e)?));
+            }
+            if raw.is_empty() {
+                break;
+            }
+            let decoded: Vec<Option<(String, FileEntry)>> = raw.into_par_iter().map(decode).collect();
+            for (path, entry) in decoded.into_iter().flatten() {
+                Self::apply(&mut st, path, entry);
+            }
         }
         Ok(())
     }
@@ -331,8 +372,10 @@ impl Index {
     }
 
     fn build_inner(&self, progress: &(dyn Fn(Progress) + Sync)) -> Result<BuildStats, Err> {
+        let mut phases = Phases::new();
         progress(Progress { phase: "walk", done: 0, total: 0 });
         let walked = self.walk();
+        phases.mark("walk");
         {
             let mut st = self.state.write().unwrap();
             st.all_files = walked.iter().map(|w| w.rel.clone()).collect();
@@ -341,10 +384,6 @@ impl Index {
         progress(Progress { phase: "walk", done: total, total });
 
         // Phase 1: hash files whose (size, mtime) changed since last time.
-        let old_merkle = {
-            let st = self.state.read().unwrap();
-            Self::current_merkle(&st)
-        };
         let hashed = AtomicUsize::new(0);
         let fresh: Vec<(String, Option<(String, u64, u64)>)> = {
             let st = self.state.read().unwrap();
@@ -363,34 +402,46 @@ impl Index {
                 .collect()
         };
 
-        // Build the new Merkle tree from known + fresh hashes, then diff against the old one.
-        let walked_set: HashSet<&str> = walked.iter().map(|w| w.rel.as_str()).collect();
-        let mut new_pairs: Vec<(String, String)> = Vec::with_capacity(total);
-        let mut meta_only: Vec<(String, u64, u64)> = Vec::new();
-        {
+        phases.mark("hash changed files");
+        // Nothing needed hashing and the walk found exactly the files we already know: the tree cannot have changed, so
+        // do not rebuild and diff an identical one (the common case when the app is reopened on an unchanged repo).
+        let unchanged = fresh.is_empty() && {
             let st = self.state.read().unwrap();
-            let fresh_map: HashMap<&str, &Option<(String, u64, u64)>> = fresh.iter().map(|(p, r)| (p.as_str(), r)).collect();
-            for w in &walked {
-                match fresh_map.get(w.rel.as_str()) {
-                    Some(Some((h, _, _))) => {
-                        if st.files.get(&w.rel).map(|f| &f.hash == h).unwrap_or(false) {
-                            meta_only.push((w.rel.clone(), w.size, w.mtime));
+            st.files.len() == total && walked.iter().all(|w| st.files.contains_key(&w.rel))
+        };
+        let mut meta_only: Vec<(String, u64, u64)> = Vec::new();
+        let (new_merkle, d) = if unchanged {
+            (None, merkle::Diff::default())
+        } else {
+            let old_merkle = Self::current_merkle(&self.state.read().unwrap());
+            // Build the new Merkle tree from known + fresh hashes, then diff against the old one.
+            let mut new_pairs: Vec<(String, String)> = Vec::with_capacity(total);
+            {
+                let st = self.state.read().unwrap();
+                let fresh_map: HashMap<&str, &Option<(String, u64, u64)>> = fresh.iter().map(|(p, r)| (p.as_str(), r)).collect();
+                for w in &walked {
+                    match fresh_map.get(w.rel.as_str()) {
+                        Some(Some((h, _, _))) => {
+                            if st.files.get(&w.rel).map(|f| &f.hash == h).unwrap_or(false) {
+                                meta_only.push((w.rel.clone(), w.size, w.mtime));
+                            }
+                            new_pairs.push((w.rel.clone(), h.clone()));
                         }
-                        new_pairs.push((w.rel.clone(), h.clone()));
-                    }
-                    Some(None) => {} // unreadable or binary: not indexed
-                    None => {
-                        if let Some(f) = st.files.get(&w.rel) {
-                            new_pairs.push((w.rel.clone(), f.hash.clone()));
+                        Some(None) => {} // unreadable or binary: not indexed
+                        None => {
+                            if let Some(f) = st.files.get(&w.rel) {
+                                new_pairs.push((w.rel.clone(), f.hash.clone()));
+                            }
                         }
                     }
                 }
             }
-        }
-        let _ = walked_set;
-        new_pairs.sort();
-        let new_merkle = merkle::build(&new_pairs);
-        let d = merkle::diff(&old_merkle, &new_merkle);
+            new_pairs.sort();
+            let new_merkle = merkle::build(&new_pairs);
+            let d = merkle::diff(&old_merkle, &new_merkle);
+            (Some(new_merkle), d)
+        };
+        phases.mark("new merkle tree + diff");
 
         // Phase 2: parse + embed only the changed files, in batches.
         let changed = d.added_or_changed;
@@ -444,13 +495,15 @@ impl Index {
             }
             st.graph = None;
         }
+        phases.mark("parse, embed, persist");
         {
             let mut st = self.state.write().unwrap();
-            st.merkle = Some(new_merkle);
+            if new_merkle.is_some() {
+                st.merkle = new_merkle; // unchanged: the root already held (if any) is still right
+            }
         }
-        self.ensure_graph(); // so the first repo_map after indexing is instant
         progress(Progress { phase: "done", done: total, total });
-        Ok(BuildStats { total_files: total, reparsed: changed.len(), removed: gone.len(), embedded_chunks: self.embed_calls.load(Ordering::Relaxed) - embed_before, millis: 0 })
+        Ok(BuildStats { total_files: total, reparsed: changed.len(), removed: gone.len(), embedded_chunks: self.embed_calls.load(Ordering::Relaxed) - embed_before, millis: 0, phases: phases.out })
     }
 
     /// Incremental update after a save. Returns true if content changed.
@@ -615,6 +668,22 @@ impl Index {
         Ok(hits)
     }
 
+    /// Build the import graph now (otherwise the first `repo_map` or dependency query builds it on demand). The app calls
+    /// this after announcing that indexing finished, so the graph never delays "ready".
+    pub fn warm(&self) {
+        self.ensure_graph();
+        self.ensure_merkle();
+    }
+
+    /// The Merkle root of the indexed files, computed the first time it is needed and kept until the next build.
+    fn ensure_merkle(&self) {
+        if self.state.read().unwrap().merkle.is_some() {
+            return;
+        }
+        let m = Self::current_merkle(&self.state.read().unwrap());
+        self.state.write().unwrap().merkle.get_or_insert(m);
+    }
+
     fn ensure_graph(&self) {
         if self.state.read().unwrap().graph.is_some() {
             return;
@@ -688,6 +757,7 @@ impl Index {
     }
 
     pub fn status(&self) -> Status {
+        self.ensure_merkle();
         let st = self.state.read().unwrap();
         Status {
             indexed_files: st.files.len(),

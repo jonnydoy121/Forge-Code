@@ -39,6 +39,7 @@ pub fn index_start(app: AppHandle, state: State<IndexState>, root: String, embed
             let _ = app2.emit("index-progress", p);
         });
         let _ = app2.emit("index-built", res.as_ref().map(|s: &BuildStats| s.clone()).map_err(|e| e.clone()));
+        bg.warm(); // after "ready": the first repo map is then instant, and it never delayed the ready signal
     });
     let app3 = app.clone();
     let w = idx.watch(move |files| {

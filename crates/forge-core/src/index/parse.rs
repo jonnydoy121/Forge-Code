@@ -298,7 +298,7 @@ fn chunk(content: &str, defs: &mut [(usize, usize)]) -> Vec<ChunkMeta> {
     let mut chunks: Vec<(usize, usize)> = Vec::new();
     let mut cursor = 0usize;
     let lines: Vec<&str> = content.split('\n').collect();
-    let mut push_gap = |from: usize, to: usize, chunks: &mut Vec<(usize, usize)>| {
+    let push_gap = |from: usize, to: usize, chunks: &mut Vec<(usize, usize)>| {
         let mut s = from;
         while s <= to {
             let e = (s + WINDOW - 1).min(to);
