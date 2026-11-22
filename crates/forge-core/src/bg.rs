@@ -7,7 +7,9 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 const MAX_LINES: usize = 2000;
 
@@ -15,6 +17,8 @@ struct Proc {
     command: String,
     child: Child,
     lines: Arc<Mutex<VecDeque<String>>>,
+    /// set by each output reader when it reaches end of stream
+    drained: Vec<Arc<AtomicBool>>,
 }
 
 #[derive(Default)]
@@ -37,7 +41,9 @@ pub struct BgOutput {
     pub output: String,
 }
 
-fn pump(r: impl std::io::Read + Send + 'static, lines: Arc<Mutex<VecDeque<String>>>, tag: &'static str) {
+fn pump(r: impl std::io::Read + Send + 'static, lines: Arc<Mutex<VecDeque<String>>>, tag: &'static str) -> Arc<AtomicBool> {
+    let done = Arc::new(AtomicBool::new(false));
+    let flag = done.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(r).lines().map_while(Result::ok) {
             let mut q = lines.lock().unwrap();
@@ -46,7 +52,9 @@ fn pump(r: impl std::io::Read + Send + 'static, lines: Arc<Mutex<VecDeque<String
             }
             q.push_back(if tag.is_empty() { line } else { format!("[{tag}] {line}") });
         }
+        flag.store(true, Ordering::Release);
     });
+    done
 }
 
 #[cfg(windows)]
@@ -95,14 +103,13 @@ impl Background {
         }
         let mut child = cmd.spawn().map_err(|e| format!("failed to start: {e}"))?;
         let lines = Arc::new(Mutex::new(VecDeque::new()));
-        pump(child.stdout.take().unwrap(), lines.clone(), "");
-        pump(child.stderr.take().unwrap(), lines.clone(), "stderr");
+        let drained = vec![pump(child.stdout.take().unwrap(), lines.clone(), ""), pump(child.stderr.take().unwrap(), lines.clone(), "stderr")];
         let id = {
             let mut n = self.next.lock().unwrap();
             *n += 1;
             *n
         };
-        self.procs.lock().unwrap().insert(id, Proc { command: command.to_string(), child, lines });
+        self.procs.lock().unwrap().insert(id, Proc { command: command.to_string(), child, lines, drained });
         Ok(id)
     }
 
@@ -110,6 +117,14 @@ impl Background {
         let mut procs = self.procs.lock().unwrap();
         let p = procs.get_mut(&id).ok_or_else(|| format!("no background process {id}"))?;
         let status = p.child.try_wait().map_err(|e| e.to_string())?;
+        if status.is_some() {
+            // The process has exited but its output readers may not have copied the last lines yet. Wait briefly for
+            // them (bounded: a grandchild that inherited the pipe could keep it open indefinitely).
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_millis(500) && !p.drained.iter().all(|d| d.load(Ordering::Acquire)) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
         let q = p.lines.lock().unwrap();
         let skip = q.len().saturating_sub(last.max(1));
         Ok(BgOutput { running: status.is_none(), exit_code: status.and_then(|s| s.code()), output: q.iter().skip(skip).cloned().collect::<Vec<_>>().join("\n") })

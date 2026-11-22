@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Race fix found by CI
+- `Background::read` could report a finished process before its output readers had copied the final lines, so the agent could miss a process's last output (flaky on Linux CI). It now waits (bounded, 500 ms) for the readers to drain once the process has exited.
+
 ### Parallel agent threads (research gap #2)
 - Several agent threads run at once: a tab strip above the agent panel (`+` to add, "Close thread" for finished ones). Each thread is its own conversation with its own runtime (worker or process), keeps running while hidden, and shows a running dot. Edits from every thread land in the shared review queue and go through the usual conflict check on accept.
 - Concurrency fixes this needed: permission prompts now queue instead of overwriting each other (a second prompt used to orphan the first), per-thread saved sessions, per-thread runtime cleanup (the global "live runtime" that would have killed other threads' runtimes is gone), and a run counter so accepting changes mid-run never triggers the post-accept verification.
