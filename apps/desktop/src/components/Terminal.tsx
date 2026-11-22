@@ -3,6 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { ptyApi } from "../lib/ipc";
+import { terminalRegistry } from "../lib/terminalRegistry";
 
 interface Props {
   cwd: string | null;
@@ -24,6 +25,12 @@ export function Terminal({ cwd, visible, dark }: Props) {
     f.fit();
     term.current = t;
     fit.current = f;
+    terminalRegistry.read = () => {
+      const buf = t.buffer.active;
+      const lines: string[] = [];
+      for (let i = Math.max(0, buf.length - 200); i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+      return lines.join("\n").trim();
+    };
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
@@ -46,6 +53,7 @@ export function Terminal({ cwd, visible, dark }: Props) {
 
     return () => {
       disposed = true;
+      terminalRegistry.read = () => "";
       ro.disconnect();
       unlisten?.();
       if (idRef.current !== null) void ptyApi.kill(idRef.current);

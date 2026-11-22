@@ -12,6 +12,7 @@
     "@forge/checkpoints": "*",
     "@forge/verify": "*",
     "@forge/safety": "*",
-    "@forge/plans": "*"
+    "@forge/plans": "*",
+    "@forge/context-store": "*"
   }
 }

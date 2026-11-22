@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Phase 7 - Rules and memory
+- `@forge/context-store`: rule engine with the full precedence chain (user rules < AGENTS.md and imported CLAUDE.md, .cursorrules, .cursor/rules, .windsurfrules, copilot instructions < nested AGENTS.md, nearest last < scoped .forge/rules with always/auto/agent/manual activation), per-rule "why it applies" reasons, a rules linter (contradictions with ESLint, Prettier, editorconfig, dependencies, scripts, and secrets), AGENTS.md generation from the repo, memories as Markdown files (project and personal), correction detection, docs indexing with BM25 retrieval, session transcripts, fresh-thread suggestion.
+- Runtime: compaction near a threshold (default 80%) keeping rules, plan, file list and open decisions, PreCompact/PostCompact hooks, summaries folded across compactions; token meter calibrated to provider-reported usage; sub-agents (`delegate`) with a fresh read-only context that return only a report.
+- UI: Context pane (rules with reasons and warnings, memories, docs), attachment chips (file, folder, symbol, docs, web, git diff, terminal, rule, memory), meter breakdown by category, compaction notice with the summary, memory/rule offers on corrections, new-thread suggestion, resume of the previous session. App shortcuts now use a capture-phase listener so they win over Monaco bindings.
 ### Phase 6 - Planning
 - `@forge/plans`: plan files (.forge/plans/<slug>.md) with a forgiving parser, validation (goal, tasks, acceptance checks), in-place status/comment/file edits, `write_plan` and `ask_user` tools (at most 3 questions, with defaults), PlanStore, PlanExecutor (step-by-step, status tracked in the file, pause/resume from the first unverified step), PlanGuard (edits outside the plan stop and ask; approval records the file in the plan), conservative intent classification ("go" builds; "update the plan and go" never does) and a large-request heuristic.
 - Mode enforcement: new `plan` tool class (Plan mode can read and write the plan file only); mode-specific system prompts.

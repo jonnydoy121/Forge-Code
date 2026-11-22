@@ -16,6 +16,9 @@ import {
 } from "@forge/verify";
 import { createPermissionGate, type AskRequest, type Remember } from "@forge/safety";
 import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/plans";
+import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts } from "@forge/context-store";
+import { loadSettings } from "./settings";
+import { fetchText } from "./http";
 import type { Runtime, VerifyDeps } from "@forge/agent-runtime";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexBackend } from "./ipc";
@@ -69,6 +72,17 @@ export interface WorkspaceServices {
   plans: PlanStore;
   planGuard: PlanGuard;
   planTools: RegisteredTool[];
+  rules: RuleEngine;
+  memories: MemoryStore;
+  docs: DocsStore;
+  sessions: SessionStore;
+  contextTools: RegisteredTool[];
+  /** Detected project facts (stack, config, code conventions) for linting and rule generation. */
+  facts(): Promise<ProjectFacts>;
+  /** Rules that contradict the project's own configuration, or contain secrets. */
+  lintAll(): Promise<LintWarning[]>;
+  /** Draft an AGENTS.md from the repo and propose it as a reviewable change. */
+  proposeGeneratedRules(): Promise<void>;
 }
 
 const SESSION_KEY = "forge.session.v1";
@@ -104,6 +118,8 @@ export async function createWorkspaceServices(opts: {
   askAddFile: (question: string, path: string, step: number | undefined) => Promise<boolean>;
   onPlanWritten: (slug: string) => void;
   onBlocked: (path: string, message: string) => void;
+  /** Shown to the developer whenever the agent creates a memory itself. */
+  onMemoryCreated: (name: string, body: string) => void;
 }): Promise<WorkspaceServices> {
   const root = norm(opts.root).replace(/\/+$/, "");
   const sessionId = sessionIdFor(root);
@@ -168,6 +184,19 @@ export async function createWorkspaceServices(opts: {
       }, 400);
     },
   });
+
+  const home = await invoke<string | null>("home_dir").catch(() => null);
+  const rules = new RuleEngine(diskFs, root, () => loadSettings().userRules);
+  const memories = new MemoryStore(diskFs, { project: `${root}/.forge/memory`, user: home ? `${norm(home)}/.forge/memory` : undefined }, opts.onChange);
+  const docs = new DocsStore(diskFs, `${root}/.forge/docs`, fetchText, opts.onChange);
+  const sessions = new SessionStore(diskFs, `${root}/.forge/sessions`);
+  const uniqueFiles = async (pattern: string, glob?: string) => new Set((await indexBackend.grep(pattern, glob, 5000).catch(() => [])).map((h) => h.file)).size;
+  const facts = async () =>
+    collectFacts(diskFs, root, {
+      defaultExportFiles: await uniqueFiles("^export default"),
+      namedExportFiles: await uniqueFiles("^export (const|function|class|type|interface|enum) "),
+      testNaming: { test: await uniqueFiles("\\b(describe|test|it)\\(", "**/*.test.*"), spec: await uniqueFiles("\\b(describe|test|it)\\(", "**/*.spec.*") },
+    });
 
   const plans = new PlanStore(diskFs, root, opts.onChange);
   const planGuard = new PlanGuard({ store: plans, askAddFile: opts.askAddFile, onBlocked: opts.onBlocked }, root);
@@ -251,5 +280,16 @@ export async function createWorkspaceServices(opts: {
     plans,
     planGuard,
     planTools: createPlanTools({ store: plans, askUser: opts.askQuestions, onPlanWritten: opts.onPlanWritten }),
+    rules,
+    memories,
+    docs,
+    sessions,
+    contextTools: createContextTools({ rules, docs, memories, autoMemories: () => loadSettings().autoMemories, onMemoryCreated: opts.onMemoryCreated }),
+    facts,
+    lintAll: async () => lintRules(await rules.load(), await facts()),
+    proposeGeneratedRules: async () => {
+      const draft = generateAgentsMd(await facts(), await commands(), root.split("/").pop());
+      await pending.propose(`${root}/AGENTS.md`, draft, "Draft AGENTS.md generated from the detected stack, commands and conventions", { requireReview: true });
+    },
   };
 }

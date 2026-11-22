@@ -75,3 +75,32 @@ ${s.text}`);
   meter.unshift({ id: "system", label: "System prompt", tokens: estimateTokens(opts.base), trimmed: false });
   return { system, history: kept, meter, totalTokens: total };
 }
+
+/**
+ * Learns how far the character-based estimate is from what the provider actually counts, so the token meter
+ * can be calibrated against reported usage. Local models that report no usage keep the raw estimate.
+ */
+export class TokenCalibrator {
+  private ratios: number[] = [];
+  constructor(private window = 8) {}
+
+  /** Record one request: our estimate vs the provider's reported input tokens. */
+  observe(estimated: number, reported: number) {
+    if (estimated > 0 && reported > 0) {
+      this.ratios.push(reported / estimated);
+      if (this.ratios.length > this.window) this.ratios.shift();
+    }
+  }
+
+  get ratio(): number {
+    return this.ratios.length ? this.ratios.reduce((a, b) => a + b, 0) / this.ratios.length : 1;
+  }
+
+  get samples() {
+    return this.ratios.length;
+  }
+
+  adjust(estimate: number): number {
+    return Math.round(estimate * this.ratio);
+  }
+}

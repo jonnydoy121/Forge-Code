@@ -63,5 +63,11 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 - A step is marked verified when its agent turn ends without failed checks and the developer has resolved the step's pending changes; if no checks are configured the step is still marked verified, with an "Unverified" report beside it.
 - Not yet: splitting plan steps across sub-agents (Phase 7 adds sub-agents generally).
 
+## Context management (Phase 7)
+- Rules are rebuilt as system sections on every turn, so they and the active plan survive compaction by construction; only conversation history is summarised.
+- Token meter: estimate is chars/4 over system, history and tool specs, scaled by a rolling ratio against the provider's reported input tokens. Within 5% is verified against a simulated provider; models that report no usage (some local ones) show an estimate, labelled "(est.)".
+- Docs retrieval is lexical (BM25), not vector search; fetching happens only when the developer asks, and the content is labelled untrusted reference data.
+- The "agent" rule activation is implemented as an index of descriptions plus a `get_rule` tool.
+
 ## Status
-Phases 0-6 complete. See CHANGELOG.md.
+Phases 0-7 complete. See CHANGELOG.md.

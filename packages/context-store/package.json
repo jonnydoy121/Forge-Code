@@ -1,1 +1,1 @@
-{ "name": "@forge/context-store", "version": "0.0.0", "private": true, "type": "module", "main": "src/index.ts", "dependencies": { "@forge/protocol": "*" } }
+{ "name": "@forge/context-store", "version": "0.0.0", "private": true, "type": "module", "main": "src/index.ts", "dependencies": { "@forge/protocol": "*", "@forge/tool-host": "*", "@forge/verify": "*" } }

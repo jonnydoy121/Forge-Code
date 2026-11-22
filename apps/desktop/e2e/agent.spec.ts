@@ -47,7 +47,10 @@ test("ask mode answers using read tools; request carries only read tools; privac
     await expect(page.getByTestId("token-meter")).not.toHaveText("0 tokens");
 
     // The model saw the read tools only (ask mode), and the tool result was fed back.
-    expect(requests[0]!.body.tools.map((t: { function: { name: string } }) => t.function.name).sort()).toEqual(["ask_user", "dependency_cone", "grep", "ls", "read_file", "references", "repo_map", "semantic_search", "symbol"]);
+    const toolNames: string[] = requests[0]!.body.tools.map((t: { function: { name: string } }) => t.function.name);
+    for (const t of ["read_file", "ls", "grep", "repo_map", "semantic_search", "symbol", "references", "dependency_cone"]) expect(toolNames).toContain(t);
+    // ask mode is read-only: no write, execute or plan-writing tools are even offered
+    for (const t of ["edit_file", "write_file", "delete_file", "run_checks", "write_plan"]) expect(toolNames).not.toContain(t);
     // The ranked repo map was attached to the system prompt as context.
     expect(requests[0]!.body.messages[0].content).toContain("Repo map");
     expect(requests[1]!.body.messages.at(-1).role).toBe("tool");

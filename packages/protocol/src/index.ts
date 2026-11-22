@@ -102,6 +102,7 @@ export type AgentEvent =
   | { type: "tool_result"; result: ToolResult; name: string }
   | { type: "verify"; phase: "fast" | "full"; report: unknown }
   | { type: "hook"; event: HookEvent; output: string; blocked: boolean }
+  | { type: "compaction"; summary: string; removedMessages: number; tokensBefore: number; tokensAfter: number }
   | { type: "limit"; reason: "steps" | "cost" | "aborted" | "verify" };
 export interface AgentRuntime {
   run(req: { mode: Mode; prompt: string }): AsyncIterable<AgentEvent>;

@@ -9,6 +9,7 @@ import { AgentPanel } from "./components/AgentPanel";
 import { ReviewPane } from "./components/ReviewPane";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { PlanPane } from "./components/PlanPane";
+import { ContextPane } from "./components/ContextPane";
 import { AddFilePrompt, QuestionPrompt } from "./components/Prompts";
 import { PlanExecutor, type Question } from "@forge/plans";
 import type { RunOutcome } from "./components/AgentPanel";
@@ -38,7 +39,7 @@ export function App() {
   const [indexInfo, setIndexInfo] = useState<{ progress?: string; status?: IndexStatus }>({});
   const [services, setServices] = useState<WorkspaceServices | null>(null);
   const [version, setVersion] = useState(0);
-  const [view, setView] = useState<"editor" | "review" | "plan">("editor");
+  const [view, setView] = useState<"editor" | "review" | "plan" | "context">("editor");
   const sendRef = useRef<(prompt: string, mode?: Mode) => Promise<RunOutcome>>(async () => ({}));
   const registerSend = useCallback((fn: (prompt: string, mode?: Mode) => Promise<RunOutcome>) => {
     sendRef.current = fn;
@@ -99,6 +100,7 @@ export function App() {
         setView("plan");
       },
       onBlocked: (path, message) => setNotice(message),
+      onMemoryCreated: (name, body) => setNotice(`The agent saved a memory: ${name} - ${body.slice(0, 160)}. Review it under Context > Memories.`),
     });
     setServices(svc);
     if (svc.hookErrors.length) setNotice(`.forge/hooks.json: ${svc.hookErrors.join("; ")}`);
@@ -204,6 +206,7 @@ export function App() {
       { id: "save", title: "File: Save", keybinding: "Ctrl+S", run: () => void save() },
       { id: "close-tab", title: "View: Close Editor", keybinding: "Ctrl+W", run: () => tabs.active && void closeTab(tabs.active) },
       { id: "terminal", title: "View: Toggle Terminal", keybinding: "Ctrl+`", run: () => toggleTerminal() },
+      { id: "context", title: "View: Context (rules, memories, docs)", keybinding: "Ctrl+Shift+K", run: () => setView((v) => (v === "context" ? "editor" : "context")) },
       { id: "plan", title: "View: Show Plan", keybinding: "Ctrl+Shift+L", run: () => setView((v) => (v === "plan" ? "editor" : "plan")) },
       { id: "review", title: "View: Review Pending Changes", keybinding: "Ctrl+Shift+R", run: () => setView((v) => (v === "review" ? "editor" : "review")) },
       { id: "agent-panel", title: "View: Toggle Agent Panel", keybinding: "Ctrl+L", run: () => setAgentOpen((o) => !o) },
@@ -228,8 +231,9 @@ export function App() {
         hit.run();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: app shortcuts must win over the editor's own bindings (e.g. Monaco uses Ctrl+Shift+K and Ctrl+L).
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [commands]);
 
   const pendingFiles = services ? services.pending.list() : [];
@@ -293,6 +297,20 @@ export function App() {
                 onEditFile={(p) => {
                   setView("editor");
                   void openFile(p);
+                }}
+                onClose={() => setView("editor")}
+              />
+            </div>
+          )}
+          {view === "context" && services && (
+            <div className="min-h-0 flex-1">
+              <ContextPane
+                services={services}
+                version={version}
+                activeFile={tabs.active ? norm(tabs.active).replace(norm(services.root) + "/", "") : null}
+                onOpenFile={(rel) => {
+                  setView("editor");
+                  void openFile(`${services.root}/${rel}`);
                 }}
                 onClose={() => setView("editor")}
               />

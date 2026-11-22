@@ -70,6 +70,12 @@ async fn run_command(cwd: String, command: String, timeout_ms: u64, env: Vec<(St
     .map_err(|e| e.to_string())?
 }
 
+/// The user's home directory, for personal memories.
+#[tauri::command]
+fn home_dir() -> Option<String> {
+    std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok()
+}
+
 /// Workspace to open on launch (FORGE_WORKSPACE), used for demos and tests.
 #[tauri::command]
 fn initial_workspace() -> Option<String> {
@@ -91,6 +97,7 @@ fn main() {
             remove_file,
             list_names,
             git_run,
+            home_dir,
             run_command,
             initial_workspace,
             pty::pty_spawn,

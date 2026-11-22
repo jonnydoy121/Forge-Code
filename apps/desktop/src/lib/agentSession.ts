@@ -1,9 +1,10 @@
-import { Gateway, type FetchLike } from "@forge/model-gateway";
-import { Runtime, type ContextSection } from "@forge/agent-runtime";
+import { Gateway } from "@forge/model-gateway";
+import { Runtime, createSubAgentTool, type ContextSection } from "@forge/agent-runtime";
 import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
 import { modePrompt } from "@forge/plans";
 import { fsApi, indexBackend } from "./ipc";
+import { pickFetch } from "./http";
 import type { AgentSettings } from "./settings";
 import type { WorkspaceServices } from "./workspace";
 
@@ -12,15 +13,6 @@ export const tauriFs: FsBackend = {
   readdir: async (p) => (await fsApi.listDir(p)).map((e) => ({ name: e.name, isDir: e.is_dir })),
   writeFile: fsApi.writeFile,
 };
-
-/** Tauri's HTTP plugin bypasses webview CORS (needed for Ollama and some providers); plain fetch outside Tauri. */
-async function pickFetch(): Promise<FetchLike> {
-  if ("__TAURI_INTERNALS__" in window) {
-    const { fetch } = await import("@tauri-apps/plugin-http");
-    return (url, init) => fetch(url, init);
-  }
-  return (url, init) => fetch(url, init);
-}
 
 export interface AuditEntry { at: number; kind: string; name: string; detail?: string }
 
@@ -38,10 +30,22 @@ export async function createSession(opts: {
     onRequest: (i) => opts.audit({ at: Date.now(), kind: "model-request", name: `${i.provider}/${i.model}`, detail: `${i.url} ${i.local ? "(local)" : "(REMOTE)"}` }),
   });
   gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
+  const readTools = [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.contextTools.filter((t) => t.spec.class === "read" && t.spec.name !== "remember")];
+  // Sub-agents: fresh context, read-only tools, no `delegate` (no recursion). Only their report comes back.
+  const makeSub = () =>
+    new Runtime({
+      gateway,
+      tools: createToolHost({ root: opts.services.root, fs: opts.services.overlay(tauriFs), tools: readTools }),
+      provider: "default",
+      model: settings.model,
+      limits: { maxSteps: 10, maxCostUsd: settings.maxCostUsd },
+      budgetTokens: settings.budgetTokens,
+      audit: (e) => opts.audit({ at: Date.now(), kind: `sub-agent ${e.kind}`, name: e.name, detail: e.detail }),
+    });
   const tools = createToolHost({
     root: opts.services.root,
     fs: opts.services.overlay(tauriFs),
-    tools: [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.editTools, ...opts.services.verifyTools, ...opts.services.planTools],
+    tools: [...readTools, ...opts.services.editTools, ...opts.services.verifyTools, ...opts.services.planTools, ...opts.services.contextTools.filter((t) => t.spec.name === "remember"), createSubAgentTool({ make: makeSub, onCost: (usd) => void (runtime.costUsd += usd) })],
   });
   const runtime = new Runtime({
     gateway,
@@ -53,6 +57,8 @@ export async function createSession(opts: {
     gate: opts.services.gate,
     verify: opts.services.verifyDeps,
     hooks: opts.services.hooks,
+    budgetTokens: settings.budgetTokens,
+    compaction: { threshold: settings.compactionThreshold },
     limits: { maxSteps: settings.maxSteps, maxCostUsd: settings.maxCostUsd },
     audit: (e) => opts.audit({ at: Date.now(), kind: e.kind, name: e.name, detail: e.detail }),
   });

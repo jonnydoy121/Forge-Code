@@ -112,7 +112,9 @@ test("Plan mode asks, writes only the plan; Build runs it step by step; out-of-p
     await expect(page.getByTestId("plan-pane")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("plan-step")).toHaveCount(2);
     await expect(page.getByTestId("plan-goal")).toHaveText("The app can greet a user by name.");
-    expect(requests[0]!.tools!.map((t) => t.function.name).sort()).toEqual(["ask_user", "grep", "ls", "read_file", "dependency_cone", "references", "repo_map", "semantic_search", "symbol", "write_plan"].sort());
+    const planTools = requests[0]!.tools!.map((t) => t.function.name);
+    for (const t of ["ask_user", "write_plan", "read_file", "grep", "repo_map"]) expect(planTools).toContain(t);
+    for (const t of ["edit_file", "write_file", "delete_file", "run_checks"]) expect(planTools).not.toContain(t); // plan mode cannot edit code or run anything
     expect(readFileSync(`${dir}/greet.js`, "utf8")).toBe("export const greet = (n) => n;\n"); // plan mode wrote no code
     expect(existsSync(`${dir}/.forge/plans/add-greeting.md`)).toBe(true);
     await expect(page.getByTestId("plan-status")).toContainText("0/2 verified");

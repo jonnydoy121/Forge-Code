@@ -12,9 +12,12 @@ import {
   type ToolResult,
 } from "@forge/protocol";
 import { feedbackMessage, finalFailureMessage, unverifiedReport, type HookRunner, type TouchedFile, type VerificationReport } from "@forge/verify";
-import { assembleContext, type AssembledContext, type ContextSection } from "./context";
+import { assembleContext, estimateTokens, TokenCalibrator, type AssembledContext, type ContextSection, type MeterEntry } from "./context";
+import { SUMMARY_MARKER, compactionCut, filesTouchedIn, summarizeWith } from "./compaction";
 
 export * from "./context";
+export * from "./compaction";
+export * from "./subagent";
 
 const BASE_PROMPT = `You are Forge, an AI coding agent inside a code editor. You work on the user's codebase using the tools provided.
 Rules:
@@ -51,6 +54,15 @@ export interface RuntimeDeps {
   modePrompt?: (mode: Mode) => string | undefined;
   verify?: VerifyDeps;
   hooks?: HookRunner;
+  compaction?: {
+    enabled?: boolean;
+    /** Fraction of the token budget at which older turns are summarised. Default 0.8. */
+    threshold?: number;
+    /** Messages kept verbatim at the end of the conversation. Default 6. */
+    keepRecent?: number;
+    /** Override the summariser (defaults to the same model, no tools). */
+    summarize?: (older: Message[], extraInstructions: string) => Promise<string>;
+  };
   /** Audit hook: every model call and tool call. */
   audit?: (entry: { kind: "model" | "tool"; name: string; detail?: string }) => void;
 }
@@ -63,7 +75,43 @@ export class Runtime implements AgentRuntime {
   public lastContext: AssembledContext | null = null;
   /** True while a run is in progress. */
   public running = false;
+  /** Learns the provider's real token counts to keep the meter accurate. */
+  public calibrator = new TokenCalibrator();
+  /** Compaction summaries produced in this session, newest last. */
+  public summaries: string[] = [];
+  private lastEstimate = 0;
+  private lastReported = 0;
   private signal?: AbortSignal;
+
+  /** Token meter: the estimate scaled by what the provider reported on earlier requests. */
+  meter(): { total: number; entries: MeterEntry[]; ratio: number; calibrated: boolean; lastReported: number } {
+    const ctx = this.lastContext;
+    const ratio = this.calibrator.ratio;
+    const entries = (ctx?.meter ?? []).map((e) => ({ ...e, tokens: Math.round(e.tokens * ratio) }));
+    return { total: this.calibrator.adjust(this.lastEstimate || ctx?.totalTokens || 0), entries, ratio, calibrated: this.calibrator.samples > 0, lastReported: this.lastReported };
+  }
+
+  /** Summarise older turns, keeping recent ones, the file list and open decisions verbatim. */
+  private async compact(keepRecent: number, tokensBefore: number): Promise<AgentEvent | null> {
+    const { deps } = this;
+    const cut = compactionCut(this.history, keepRecent);
+    if (cut <= 0) return null;
+    const older = this.history.slice(0, cut);
+    const pre = deps.hooks ? await deps.hooks.run("PreCompact") : null;
+    const summarize = deps.compaction?.summarize ?? ((msgs: Message[], extra: string) => summarizeWith(deps.gateway, deps.provider, deps.model, msgs, extra));
+    const body = (await summarize(older, pre?.output ?? "")).trim();
+    if (!body) return null;
+    const files = filesTouchedIn(older);
+    const summary = `${body}${files.length ? `
+
+Files read or changed so far: ${files.join(", ")}` : ""}`;
+    this.history.splice(0, cut, { role: "user", content: `${SUMMARY_MARKER}
+${summary}` });
+    this.summaries.push(summary);
+    if (deps.hooks) await deps.hooks.run("PostCompact");
+    const tokensAfter = this.history.reduce((n, m) => n + estimateTokens(m.content) + 4, 0);
+    return { type: "compaction", summary, removedMessages: cut, tokensBefore: this.calibrator.adjust(tokensBefore), tokensAfter: this.calibrator.adjust(tokensAfter) };
+  }
 
   constructor(private deps: RuntimeDeps) {}
 
@@ -135,16 +183,31 @@ export class Runtime implements AgentRuntime {
       if (this.costUsd >= limits.maxCostUsd) return void (yield { type: "limit", reason: "cost" });
 
       const specs = finalReport ? [] : deps.tools.listTools(req.mode);
-      const ctx = assembleContext({
-        base: deps.basePrompt ?? BASE_PROMPT,
-        sections: [
-          ...(deps.modePrompt?.(req.mode) ? [{ id: "mode", label: `Mode: ${req.mode}`, text: deps.modePrompt(req.mode)!, priority: 0 }] : []),
-          ...((await deps.sections?.()) ?? []),
-        ],
-        history: this.history,
-        budget: deps.budgetTokens ?? 100_000,
-      });
+      const budget = deps.budgetTokens ?? 100_000;
+      const build = async () =>
+        assembleContext({
+          base: deps.basePrompt ?? BASE_PROMPT,
+          sections: [
+            ...(deps.modePrompt?.(req.mode) ? [{ id: "mode", label: `Mode: ${req.mode}`, text: deps.modePrompt(req.mode)!, priority: 0 }] : []),
+            ...((await deps.sections?.()) ?? []),
+          ],
+          history: this.history,
+          budget,
+        });
+      let ctx = await build();
+      const toolTokens = estimateTokens(JSON.stringify(specs));
+      // Near the threshold (default 80%): summarise older turns. Rules, the plan and attachments are rebuilt as
+      // system sections every turn, so they survive compaction by construction.
+      const cc = deps.compaction ?? {};
+      if (cc.enabled !== false && this.calibrator.adjust(ctx.totalTokens + toolTokens) >= (cc.threshold ?? 0.8) * budget) {
+        const ev = await this.compact(cc.keepRecent ?? 6, ctx.totalTokens + toolTokens);
+        if (ev) {
+          yield ev;
+          ctx = await build();
+        }
+      }
       this.lastContext = ctx;
+      this.lastEstimate = ctx.totalTokens + toolTokens;
       deps.audit?.({ kind: "model", name: `${deps.provider}/${deps.model}`, detail: `${ctx.totalTokens} tokens` });
 
       let text = "";
@@ -158,7 +221,13 @@ export class Runtime implements AgentRuntime {
       })) {
         if (ev.type === "text") text += ev.delta;
         else if (ev.type === "tool_call" && !finalReport) calls.push(ev.call);
-        else if (ev.type === "done") this.costUsd += ev.usage.costUsd;
+        else if (ev.type === "done") {
+          this.costUsd += ev.usage.costUsd;
+          if (ev.usage.inputTokens > 0) {
+            this.lastReported = ev.usage.inputTokens;
+            this.calibrator.observe(this.lastEstimate, ev.usage.inputTokens);
+          }
+        }
         yield ev;
       }
       this.history.push({ role: "assistant", content: text, toolCalls: calls.length ? calls : undefined });

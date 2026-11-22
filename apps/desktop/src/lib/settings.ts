@@ -9,6 +9,14 @@ export interface AgentSettings {
   maxSteps: number;
   maxCostUsd: number;
   reviewMode: ReviewMode;
+  /** personal rules applied to every project (lowest precedence) */
+  userRules: string;
+  /** let the agent create memories itself (always shown to you); off by default */
+  autoMemories: boolean;
+  /** token budget for assembled context */
+  budgetTokens: number;
+  /** compact older turns when the context reaches this fraction of the budget */
+  compactionThreshold: number;
 }
 
 export const DEFAULT_MODELS: Record<AgentSettings["provider"], string> = {
@@ -25,6 +33,10 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxSteps: 12,
   maxCostUsd: 2,
   reviewMode: "review",
+  userRules: "",
+  autoMemories: false,
+  budgetTokens: 100_000,
+  compactionThreshold: 0.8,
 };
 
 const KEY = "forge.settings.v1";
