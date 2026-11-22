@@ -36,6 +36,16 @@ cargo test --workspace
 
 End-to-end (Windows): `pwsh scripts/desktop-e2e.ps1`.
 
+## Command line
+```
+npm run build:cli
+export FORGE_API_KEY=...            # or ANTHROPIC_API_KEY / OPENAI_API_KEY; Ollama needs none
+node target/cli/forge-code.cjs ask "where is auth handled?" --model llama3.1
+node target/cli/forge-code.cjs run "add input validation to signup" --model llama3.1   # prints diffs, writes nothing
+node target/cli/forge-code.cjs run "..." --model llama3.1 --apply                      # writes them
+```
+`--json` gives a machine-readable result; exit code 2 means it stopped at a step or cost limit.
+
 ## Layout
 `apps/desktop` (Tauri + React), `crates/forge-core` (Rust: filesystem, index, sandbox, secrets), `packages/*` (TypeScript:
 agent runtime, model gateway, tools, review, verification, safety, MCP, ACP). Rules for agents working in this repo are

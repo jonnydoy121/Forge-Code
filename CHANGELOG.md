@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Headless CLI (research gap #6)
+- `forge-code ask "..."` (read-only) and `forge-code run "..."` (agent). Review-first like the app: `run` prints unified diffs and writes nothing unless `--apply`. `--json` for scripts, exit codes 0 done / 1 error / 2 stopped at a limit, `--max-steps`, `--max-cost`. The API key comes only from `FORGE_API_KEY`/`ANTHROPIC_API_KEY`/`OPENAI_API_KEY` (no flag, so it cannot leak into shell history). No shell commands are offered to the model in this first version. Build with `npm run build:cli` (one file: `node target/cli/forge-code.cjs`). Verified by unit tests and by running the bundle as a real process against a mock model server.
+
 ### Race fix found by CI
 - `Background::read` could report a finished process before its output readers had copied the final lines, so the agent could miss a process's last output (flaky on Linux CI). It now waits (bounded, 500 ms) for the readers to drain once the process has exited.
 

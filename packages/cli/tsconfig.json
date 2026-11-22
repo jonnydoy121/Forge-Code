@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "." },
+  "include": ["src", "test"],
+  "references": [
+    { "path": "../protocol" },
+    { "path": "../model-gateway" },
+    { "path": "../tool-host" },
+    { "path": "../review" },
+    { "path": "../checkpoints" },
+    { "path": "../agent-runtime" }
+  ]
+}

@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "test:rust": "cargo test --workspace",
     "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:cli": "node scripts/build-cli.mjs",
     "dev": "npm run build:sidecar && npm run tauri dev -w apps/desktop",
     "build": "npm run build -w apps/desktop",
     "e2e": "npm run e2e -w apps/desktop"

@@ -1,0 +1,15 @@
+{
+  "name": "@forge/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/cli.ts",
+  "dependencies": {
+    "@forge/protocol": "*",
+    "@forge/model-gateway": "*",
+    "@forge/tool-host": "*",
+    "@forge/review": "*",
+    "@forge/checkpoints": "*",
+    "@forge/agent-runtime": "*"
+  }
+}
