@@ -23,7 +23,19 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: cargo test --workspace
+      - name: cargo test
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace 2>&1 | tee cargo-test.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" != "0" ]; then
+            # Public annotations carry the failure summary (job logs need authentication to read).
+            msg=$(grep -E "^error|panicked|FAILED|failed|^---- " cargo-test.log | head -c 3500 | tr '
+' '|')
+            echo "::error title=cargo test failed::$msg"
+          fi
+          exit $code
       - run: npm run build
       - run: npx playwright install --with-deps chromium
         working-directory: apps/desktop
