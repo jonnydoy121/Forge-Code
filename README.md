@@ -46,6 +46,8 @@ node target/cli/forge-code.cjs run "..." --model llama3.1 --apply               
 ```
 `--json` gives a machine-readable result; exit code 2 means it stopped at a step or cost limit.
 
+To let the agent run tests or linters, allow them explicitly: `run "fix the failing test" --allow "npm test" --apply`. Nothing runs unless listed, wildcards (`"npm run *"`) never permit chained or redirected commands, and the CLI has no OS sandbox (the desktop app does), so only allow commands you trust.
+
 ## Saved prompts
 Put reusable prompts in `.forge/prompts/<name>.md` (optional `description:` front matter; `$ARGUMENTS` is replaced by what follows the command). In the app type `/` to pick one; on the command line run `forge-code run "/name args"`. Commit the folder to share workflows with your team.
 

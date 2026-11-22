@@ -9,6 +9,7 @@ import { PendingChanges } from "@forge/review";
 import { InMemoryCheckpointStore } from "@forge/checkpoints";
 import type { ModelGateway } from "@forge/protocol";
 import { diskFs, promptFs, toolFs } from "./nodefs";
+import { headlessCommandTools } from "./commands";
 import { expandPrompt, loadPrompts } from "@forge/context-store";
 import { unifiedDiff } from "./format";
 
@@ -28,6 +29,8 @@ export interface Options {
   model: string | undefined;
   baseUrl: string | undefined;
   apply: boolean;
+  /** commands the agent may run (exact, or a trailing * for any arguments) */
+  allow: string[];
   json: boolean;
   maxSteps: number;
   maxCostUsd: number;
@@ -44,6 +47,8 @@ Options:
   --model <name>        model to use (or FORGE_MODEL)
   --provider <kind>     ollama (default), openai or anthropic (or FORGE_PROVIDER)
   --base-url <url>      API base URL (or FORGE_BASE_URL)
+  --allow <command>     let the agent run this command (repeatable; a trailing * allows any arguments but never
+                        chained or redirected commands). Nothing runs unless allowed, e.g. --allow "npm test"
   --max-steps <n>       tool-use steps before stopping (default 12)
   --max-cost <usd>      spending limit for the run (default 2)
   --json                machine-readable result on stdout
@@ -63,6 +68,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
     model: env.FORGE_MODEL,
     baseUrl: env.FORGE_BASE_URL,
     apply: false,
+    allow: [],
     json: false,
     maxSteps: 12,
     maxCostUsd: 2,
@@ -83,6 +89,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
       if (a === "-h" || a === "--help") return { help: true };
       else if (a === "--apply") o.apply = true;
       else if (a === "--json") o.json = true;
+      else if (a === "--allow") o.allow.push(value());
       else if (a === "--model") o.model = value();
       else if (a === "--base-url") o.baseUrl = value();
       else if (a === "--provider") {
@@ -110,6 +117,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   o.prompt = words.join(" ").trim();
   if (!o.prompt) return { error: `"${cmd}" needs a prompt` };
   if (o.apply && cmd === "ask") return { error: "--apply only makes sense with run" };
+  if (o.allow.length && cmd === "ask") return { error: "--allow only makes sense with run" };
   return o;
 }
 
@@ -147,7 +155,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       return { status: r.status, added: r.stats.added, removed: r.stats.removed, checkpoint: r.checkpoint, created: r.created, warnings: r.warnings };
     },
   };
-  const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...createEditTools(sink)] : READ_TOOLS });
+  const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : [])] : READ_TOOLS });
   const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 } });
 
   let answer = "";

@@ -11,6 +11,8 @@
     "@forge/review": "*",
     "@forge/checkpoints": "*",
     "@forge/agent-runtime": "*",
-    "@forge/context-store": "*"
+    "@forge/context-store": "*",
+    "@forge/verify": "*",
+    "@forge/safety": "*"
   }
 }

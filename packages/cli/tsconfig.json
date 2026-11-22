@@ -9,6 +9,8 @@
     { "path": "../review" },
     { "path": "../checkpoints" },
     { "path": "../agent-runtime" },
-    { "path": "../context-store" }
+    { "path": "../context-store" },
+    { "path": "../verify" },
+    { "path": "../safety" }
   ]
 }

