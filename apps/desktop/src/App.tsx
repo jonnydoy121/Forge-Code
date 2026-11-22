@@ -59,7 +59,14 @@ export function App() {
   const [report, setReport] = useState<ReportEvent | null>(null);
   const [sandboxMode, setSandboxMode] = useState<string>("");
   const [localOnly, setLocalOnly] = useState(() => loadSettings().localOnly);
-  const [permission, setPermission] = useState<{ req: AskRequest; resolve: (a: Remember) => void } | null>(null);
+  // Parallel threads can ask at the same time: prompts queue and are answered one at a time, never dropped.
+  const [permissions, setPermissions] = useState<{ req: AskRequest; resolve: (a: Remember) => void }[]>([]);
+  const permission = permissions[0] ?? null;
+  const [threads, setThreads] = useState([{ id: "main", name: "Thread 1" }]);
+  const [activeThread, setActiveThread] = useState("main");
+  const [busyThreads, setBusyThreads] = useState<Record<string, boolean>>({});
+  const nextThread = useRef(2);
+  const threadBusy = useCallback((id: string, busy: boolean) => setBusyThreads((b) => (b[id] === busy ? b : { ...b, [id]: busy })), []);
   const rootRef = useRef<string | null>(null);
   const lsp = useRef(new LspManager());
   const lspTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -90,6 +97,9 @@ export function App() {
   });
 
   async function openFolder(dir: string) {
+    setThreads([{ id: "main", name: "Thread 1" }]);
+    setActiveThread("main");
+    nextThread.current = 2;
     for (const t of tabs.tabs) disposeDoc(t.path);
     dispatch({ type: "reset" });
     setCounts({});
@@ -104,7 +114,7 @@ export function App() {
       onChange: () => setVersion((v) => v + 1),
       onReport: (e) => setReport(e),
       onHook: (event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`),
-      ask: (req) => new Promise<Remember>((resolve) => setPermission({ req, resolve })),
+      ask: (req) => new Promise<Remember>((resolve) => setPermissions((q) => [...q, { req, resolve }])),
       diagnostics: async (files) => errorMarkers(dir, files),
       askQuestions: (questions) => new Promise<string[]>((resolve) => setQuestionReq({ questions, resolve })),
       askAddFile: (question, path) => new Promise<boolean>((resolve) => setAddFileReq({ question, path, resolve })),
@@ -403,21 +413,73 @@ export function App() {
           )}
         </section>
         {agentOpen && (
-          <AgentPanel
-            root={root}
-            activePath={tabs.active}
-            services={services}
-            pendingCount={pendingFiles.length}
-            version={version}
-            onOpenReview={() => setView("review")}
-            onFilesChanged={() => void refreshFromDisk()}
-            registerSend={registerSend}
-            activePlanSlug={activePlan}
-            onStartBuild={(slug) => void startBuild(slug)}
-            externalReport={report}
-            onReport={setReport}
-            onHook={(event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`)}
-          />
+          <div className="flex min-h-0 flex-col" data-testid="agent-area">
+            <div className="flex items-center gap-1 border-b border-[var(--border)] bg-[var(--panel)] px-2 py-1 text-xs">
+              <div role="tablist" aria-label="Agent threads" className="flex items-center gap-1">
+                {threads.map((t) => (
+                  <button
+                    key={t.id}
+                    role="tab"
+                    aria-selected={t.id === activeThread}
+                    data-testid={`thread-tab-${t.id}`}
+                    className={`rounded px-2 py-0.5 ${t.id === activeThread ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
+                    onClick={() => setActiveThread(t.id)}
+                  >
+                    {t.name}
+                    {busyThreads[t.id] ? <span aria-label="running" title="running"> ●</span> : null}
+                  </button>
+                ))}
+              </div>
+              <button
+                aria-label="New thread"
+                title="Start another agent thread that runs in parallel"
+                data-testid="thread-new"
+                className="rounded px-2 py-0.5 text-[var(--muted)] hover:bg-[var(--hover)]"
+                onClick={() => {
+                  const id = `t${nextThread.current}`;
+                  setThreads((ts) => [...ts, { id, name: `Thread ${nextThread.current++}` }]);
+                  setActiveThread(id);
+                }}
+              >
+                +
+              </button>
+              {activeThread !== "main" && !busyThreads[activeThread] && (
+                <button
+                  className="ml-auto rounded px-2 py-0.5 text-[var(--muted)] hover:bg-[var(--hover)]"
+                  data-testid={`thread-close-${activeThread}`}
+                  onClick={() => {
+                    const id = activeThread;
+                    setThreads((ts) => ts.filter((x) => x.id !== id));
+                    setActiveThread("main");
+                  }}
+                >
+                  Close thread
+                </button>
+              )}
+            </div>
+            {threads.map((t) => (
+              <div key={t.id} className={t.id === activeThread ? "flex min-h-0 flex-1 flex-col [&>aside]:min-h-0 [&>aside]:flex-1" : "hidden"}>
+                <AgentPanel
+                  threadId={t.id}
+                  active={t.id === activeThread}
+                  onBusyChange={(b) => threadBusy(t.id, b)}
+                  root={root}
+                  activePath={tabs.active}
+                  services={services}
+                  pendingCount={pendingFiles.length}
+                  version={version}
+                  onOpenReview={() => setView("review")}
+                  onFilesChanged={() => void refreshFromDisk()}
+                  registerSend={registerSend}
+                  activePlanSlug={activePlan}
+                  onStartBuild={(slug) => void startBuild(slug)}
+                  externalReport={report}
+                  onReport={setReport}
+                  onHook={(event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`)}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
       <footer className="flex gap-4 border-t border-[var(--border)] bg-[var(--panel)] px-3 py-0.5 text-xs text-[var(--muted)]" data-testid="status">
@@ -471,7 +533,7 @@ export function App() {
           req={permission.req}
           onAnswer={(a) => {
             permission.resolve(a);
-            setPermission(null);
+            setPermissions((q) => q.slice(1));
           }}
         />
       )}

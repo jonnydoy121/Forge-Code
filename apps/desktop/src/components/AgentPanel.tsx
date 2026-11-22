@@ -70,9 +70,14 @@ interface Props {
   externalReport: ReportEvent | null;
   onReport: (e: ReportEvent) => void;
   onHook: (event: string, output: string) => void;
+  /** parallel threads: each panel is its own conversation and runtime */
+  threadId?: string;
+  /** only the visible thread receives review-comment sends */
+  active?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }
 
-export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook, activePlanSlug, onStartBuild }: Props) {
+export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook, activePlanSlug, onStartBuild, threadId = "main", active = true, onBusyChange }: Props) {
   const [settings, setSettings] = useState<AgentSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState(false);
   const [mode, setMode] = useState<Mode>("ask");
@@ -111,12 +116,17 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     bottom.current?.scrollIntoView?.({ block: "end" });
   }, [items]);
   useEffect(() => {
+    runtime.current?.terminate?.();
     runtime.current = null; // new workspace or settings: build a fresh session on next send
   }, [root, settings]);
+  useEffect(() => () => runtime.current?.terminate?.(), []); // closing a thread releases its worker/process
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   useEffect(() => {
     setResumable(null);
-    if (services) void services.sessions.latest().then((r) => setResumable(r && r.messages.length > 0 ? r : null)).catch(() => {});
+    if (services && threadId === "main") void services.sessions.latest().then((r) => setResumable(r && r.messages.length > 0 ? r : null)).catch(() => {});
   }, [services]);
 
   useEffect(() => {
@@ -185,6 +195,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     promptsRef.current.push(prompt);
     setBusy(true);
     setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "assistant", text: "" }]);
+    let began = false;
     try {
       if (!runtime.current) {
         runtime.current = await createSession({
@@ -255,6 +266,9 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
       }
       const rt = runtime.current;
       setRuntimeKind(rt.transport ?? "");
+      services.setRuntime(rt); // the runtime acting now: checkpoints record its history length
+      services.runBegin();
+      began = true;
       if (pendingHistory.current) {
         rt.setHistory([...rt.history, ...pendingHistory.current]);
         pendingHistory.current = null;
@@ -293,11 +307,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
       setCost(rt.costUsd);
       const m = rt.meter();
       setMeter({ total: m.total, entries: m.entries, calibrated: m.calibrated });
-      void services.sessions.save({ id: services.sessionId, savedAt: new Date().toISOString(), messages: rt.history, summaries: rt.summaries }).catch(() => {});
+      void services.sessions.save({ id: threadId === "main" ? services.sessionId : `${services.sessionId}-${threadId}`, savedAt: new Date().toISOString(), messages: rt.history, summaries: rt.summaries }).catch(() => {});
     } catch (e) {
       outcome.error = e instanceof Error ? e.message : String(e);
       setItems((i) => [...i, { kind: "notice", text: `Error: ${outcome.error}` }]);
     } finally {
+      if (began) services.runEnd();
       setItems((i) => i.filter((x) => !(x.kind === "assistant" && x.text === "")));
       setBusy(false);
       onFilesChanged();
@@ -350,11 +365,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const sendRef = useRef(send);
   sendRef.current = send;
   useEffect(() => {
+    if (!active) return;
     registerSend(async (prompt, m) => {
       setMode(m ?? "agent");
       return sendRef.current({ prompt, mode: m ?? "agent" });
     });
-  }, [registerSend]);
+  }, [registerSend, active]);
 
   const offMachine = sendsCodeOffMachine(settings);
   const category = (id: string) => (id === "system" || id === "mode" ? "System prompt" : id === "rules" ? "Rules" : id === "memories" ? "Memories" : id === "plan" ? "Plan" : id === "repo-map" ? "Repo map" : id === "conversation" ? "Conversation" : "Attachments");
@@ -491,7 +507,7 @@ ${diff}`);
           })()}
         </div>
       ) : (
-        <div className="flex-1 space-y-2 overflow-auto p-3 text-sm" data-testid="messages">
+        <div className="flex-1 space-y-2 overflow-auto p-3 text-sm" data-testid="messages" role="log" aria-label="Conversation" tabIndex={0}>
           {items.length === 0 && <p className="text-[var(--muted)]">Ask a question about this codebase. Mode "ask" is read-only.</p>}
           {items.map((it, i) =>
             it.kind === "injection" ? (
@@ -532,7 +548,7 @@ ${diff}`);
         <div className="border-t border-[var(--border)] bg-blue-900/30 px-3 py-2 text-xs" data-testid="newthread-banner">
           This looks like a different task. Start a new thread? It carries over the active plan and your memories, and leaves the old conversation behind.
           <div className="mt-1 flex gap-2">
-            <button className="rounded bg-blue-700/70 px-2 py-0.5" data-testid="newthread-yes" onClick={() => { runtime.current = null; promptsRef.current = []; setItems([]); const p = newThread; setNewThread(null); void send({ prompt: p, mode }); setInput(""); }}>New thread</button>
+            <button className="rounded bg-blue-700/70 px-2 py-0.5" data-testid="newthread-yes" onClick={() => { runtime.current?.terminate?.(); runtime.current = null; promptsRef.current = []; setItems([]); const p = newThread; setNewThread(null); void send({ prompt: p, mode }); setInput(""); }}>New thread</button>
             <button className="rounded bg-[var(--hover)] px-2 py-0.5" data-testid="newthread-no" onClick={() => { const p = newThread; void send({ prompt: p, mode }); setInput(""); }}>Continue here</button>
           </div>
         </div>

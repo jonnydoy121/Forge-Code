@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Parallel agent threads (research gap #2)
+- Several agent threads run at once: a tab strip above the agent panel (`+` to add, "Close thread" for finished ones). Each thread is its own conversation with its own runtime (worker or process), keeps running while hidden, and shows a running dot. Edits from every thread land in the shared review queue and go through the usual conflict check on accept.
+- Concurrency fixes this needed: permission prompts now queue instead of overwriting each other (a second prompt used to orphan the first), per-thread saved sessions, per-thread runtime cleanup (the global "live runtime" that would have killed other threads' runtimes is gone), and a run counter so accepting changes mid-run never triggers the post-accept verification.
+- Not done: a git worktree per thread. Two threads editing the same file are caught at accept time (conflict check), not prevented. The permission queue is untested under real concurrent prompts. The conversation log is now keyboard-focusable (axe).
+
 ### First CI run (Windows and macOS green, Ubuntu found a real bug)
 - On Linux a command that exceeded its timeout was not actually stopped: only the shell was killed, its child kept the output pipes open (the timeout test took 30 s). Commands, background processes and MCP/ACP processes now start in their own process group on Unix and the whole group is killed (`exec.rs`, `bg.rs`, `proc.rs`).
 - The keyring test skips on headless Linux (no Secret Service); CI annotates cargo failures so they can be read without log access.

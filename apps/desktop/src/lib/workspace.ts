@@ -109,6 +109,9 @@ export interface WorkspaceServices {
   hooks: HookRunner;
   gate: ReturnType<typeof createPermissionGate>;
   setRuntime(rt: AgentRuntime | null): void;
+  /** parallel threads: count of runs in flight (accepting changes mid-run must not trigger the post-accept verification) */
+  runBegin(): void;
+  runEnd(): void;
   commands(): Promise<ProjectCommands>;
   /** Run checks on demand ("Run checks" button). */
   runVerification(phase: "fast" | "full"): Promise<VerificationReport>;
@@ -185,6 +188,7 @@ export async function createWorkspaceServices(opts: {
   const checkpoints = new FileCheckpointStore({ fs: diskFs, dir: `${root}/.forge/checkpoints/${sessionId}` });
   const rel = (p: string) => (p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
   let runtime: AgentRuntime | null = null;
+  let activeRuns = 0;
   let seq = 0;
 
   const hooksText = await diskFs.read(`${root}/.forge/hooks.json`);
@@ -249,7 +253,7 @@ export async function createWorkspaceServices(opts: {
       // Edits accepted by the developer: once nothing is left to review, verify what landed.
       clearTimeout(verifyTimer);
       verifyTimer = setTimeout(() => {
-        if (pending.list().length === 0 && touchedAfterAccept.size > 0 && !runtime?.running) {
+        if (pending.list().length === 0 && touchedAfterAccept.size > 0 && activeRuns === 0) {
           const files = [...touchedAfterAccept].map((path) => ({ path, created: false }));
           touchedAfterAccept.clear();
           void verifyOpts("full", files).then((report) => opts.onReport({ report, source: "accepted-changes", seq: ++seq }));
@@ -436,6 +440,8 @@ export async function createWorkspaceServices(opts: {
     setRuntime: (rt) => {
       runtime = rt;
     },
+    runBegin: () => void activeRuns++,
+    runEnd: () => void (activeRuns = Math.max(0, activeRuns - 1)),
     commands,
     runVerification: async (phase) => {
       const files = [...sessionTouched].map(([path, created]) => ({ path, created }));

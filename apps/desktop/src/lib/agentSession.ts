@@ -26,8 +26,6 @@ function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
   return gateway;
 }
 
-let liveRuntime: AgentRuntime | null = null;
-
 /** The agent loop's transport: its own OS process when the bundled runtime is available, otherwise a Web Worker. */
 async function openPort(root: string, preferProcess: boolean) {
   if (preferProcess) {
@@ -52,8 +50,6 @@ export async function createSession(opts: {
   onHook?: (event: string, output: string) => void;
 }) {
   const { settings, services } = opts;
-  liveRuntime?.terminate?.(); // the previous session's worker/process
-  liveRuntime = null;
   const gateway = makeGateway(services, settings);
   const audit = (kind: "model" | "tool", prefix = "") => (e: { kind: "model" | "tool"; name: string; detail?: string }) =>
     services.audit.record({ kind: e.kind === "model" ? "model" : kind, name: `${prefix}${e.name}`, detail: e.detail });
@@ -121,7 +117,6 @@ export async function createSession(opts: {
           audit: auditEntry,
         }) as unknown as AgentRuntime);
   runtime.transport = transport?.kind ?? "inline";
-  liveRuntime = runtime;
   services.setRuntime(runtime);
   const started = await runtime.sessionStart().catch(() => null);
   if (started?.type === "hook") opts.onHook?.("SessionStart", started.output);

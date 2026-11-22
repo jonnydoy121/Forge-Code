@@ -39,8 +39,8 @@ this. Treat "what users dislike" as hypotheses to validate, not findings.
 ## Gaps, ranked by user value and fit
 | # | Gap | Who has it | Why it matters | Effort |
 |---|---|---|---|---|
-| 1 | **Inline edit** (select code, describe the change, get a diff to review) | Cursor, Zed | Daily-use feature; the review model makes ours safer than "apply instantly" | small, builds on existing pieces |
-| 2 | **Parallel threads** (several agents at once, each with its own history) | Zed, Cursor | The 2026 headline feature | medium |
+| 1 | **Inline edit** (BUILT) (select code, describe the change, get a diff to review) | Cursor, Zed | Daily-use feature; the review model makes ours safer than "apply instantly" | small, builds on existing pieces |
+| 2 | **Parallel threads** (BUILT, without worktrees) (several agents at once, each with its own history) | Zed, Cursor | The 2026 headline feature | medium |
 | 3 | **Git worktree per agent** so parallel agents cannot collide | Zed | Makes #2 safe | medium |
 | 4 | **Skills / custom agents** as files in the repo | Kiro, Zed | Shareable team workflows | medium |
 | 5 | **Edit prediction** (ghost-text completion) | Cursor, Zed | Table stakes for an editor, but needs a fast low-latency model | large, model-dependent |
