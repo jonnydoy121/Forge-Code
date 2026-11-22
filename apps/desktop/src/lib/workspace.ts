@@ -22,7 +22,7 @@ import { AcpClient, forgeAcpHandlers, parseAcpConfig, type AcpAgentConfig, type 
 import type { LineTransport } from "@forge/rpc";
 import { listen } from "@tauri-apps/api/event";
 import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/plans";
-import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts } from "@forge/context-store";
+import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts, loadPrompts, type SavedPrompt } from "@forge/context-store";
 import { loadSettings } from "./settings";
 import { fetchText as rawFetchText, pickFetch } from "./http";
 import type { VerifyDeps } from "@forge/agent-runtime";
@@ -123,6 +123,8 @@ export interface WorkspaceServices {
   planTools: RegisteredTool[];
   rules: RuleEngine;
   memories: MemoryStore;
+  /** reusable slash-command prompts from .forge/prompts/*.md */
+  prompts(): Promise<SavedPrompt[]>;
   docs: DocsStore;
   sessions: SessionStore;
   contextTools: RegisteredTool[];
@@ -467,6 +469,7 @@ export async function createWorkspaceServices(opts: {
     planTools: createPlanTools({ store: plans, askUser: opts.askQuestions, onPlanWritten: opts.onPlanWritten }),
     rules,
     memories,
+    prompts: () => loadPrompts(diskFs, `${root}/.forge/prompts`),
     docs,
     sessions,
     contextTools: createContextTools({ rules, docs, memories, autoMemories: () => loadSettings().autoMemories, onMemoryCreated: opts.onMemoryCreated }),

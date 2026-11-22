@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Saved prompts / slash commands (research gap #4, the repo-file part)
+- `.forge/prompts/<name>.md` files become slash commands: type `/` in the agent panel for autocomplete (Tab completes), `/review src/a.ts` sends the file's text with `$ARGUMENTS` replaced (arguments are never interpreted as replacement patterns; a body without the placeholder gets the arguments appended). Optional `description:` front matter, else the first line. Unknown `/words` are ordinary text. The CLI expands them too: `forge-code run "/review src/a.ts"`, so a team shares one set of workflows between the app and CI. Unit tests, a real-window e2e, and CLI tests. Not built: skills that carry tools or scripts, and per-user (non-repo) prompts.
+
 ### Headless CLI (research gap #6)
 - `forge-code ask "..."` (read-only) and `forge-code run "..."` (agent). Review-first like the app: `run` prints unified diffs and writes nothing unless `--apply`. `--json` for scripts, exit codes 0 done / 1 error / 2 stopped at a limit, `--max-steps`, `--max-cost`. The API key comes only from `FORGE_API_KEY`/`ANTHROPIC_API_KEY`/`OPENAI_API_KEY` (no flag, so it cannot leak into shell history). No shell commands are offered to the model in this first version. Build with `npm run build:cli` (one file: `node target/cli/forge-code.cjs`). Verified by unit tests and by running the bundle as a real process against a mock model server.
 

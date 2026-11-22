@@ -8,6 +8,7 @@
     { "path": "../tool-host" },
     { "path": "../review" },
     { "path": "../checkpoints" },
-    { "path": "../agent-runtime" }
+    { "path": "../agent-runtime" },
+    { "path": "../context-store" }
   ]
 }

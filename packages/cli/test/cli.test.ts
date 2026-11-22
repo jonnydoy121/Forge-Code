@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -110,5 +110,26 @@ describe("unified diff", () => {
   });
   it("marks new files", () => {
     expect(unifiedDiff("n.txt", null, [{ id: "a", oldStart: 0, oldLines: [""], newLines: ["hello", ""] }])).toContain("--- /dev/null");
+  });
+});
+
+describe("saved prompts", () => {
+  it("expands /name arguments from .forge/prompts before running", async () => {
+    const dir = project();
+    mkdirSync(`${dir}/.forge/prompts`, { recursive: true });
+    writeFileSync(`${dir}/.forge/prompts/review.md`, "---\ndescription: Review\n---\nReview $ARGUMENTS for bugs.\n");
+    const gw = new ScriptedGateway([[text("fine"), done]]);
+    const t = io(dir, gw);
+    expect(await runCli(["ask", "/review a.js"], t.i)).toBe(0);
+    const sent = JSON.stringify(gw.requests[0]!.messages);
+    expect(sent).toContain("Review a.js for bugs.");
+    expect(sent).not.toContain("/review");
+    expect(t.err()).toContain("using saved prompt /review");
+  });
+
+  it("treats an unknown slash command as ordinary text", async () => {
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    await runCli(["ask", "/nosuch thing"], io(project(), gw).i);
+    expect(JSON.stringify(gw.requests[0]!.messages)).toContain("/nosuch thing");
   });
 });

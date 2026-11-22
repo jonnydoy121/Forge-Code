@@ -8,7 +8,8 @@ import { READ_TOOLS, createEditTools, createToolHost, type EditSink } from "@for
 import { PendingChanges } from "@forge/review";
 import { InMemoryCheckpointStore } from "@forge/checkpoints";
 import type { ModelGateway } from "@forge/protocol";
-import { diskFs, toolFs } from "./nodefs";
+import { diskFs, promptFs, toolFs } from "./nodefs";
+import { expandPrompt, loadPrompts } from "@forge/context-store";
 import { unifiedDiff } from "./format";
 
 export interface Io {
@@ -127,6 +128,13 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       g.register("default", { kind: o.provider, baseUrl: o.baseUrl, apiKey: io.env.FORGE_API_KEY ?? (o.provider === "anthropic" ? io.env.ANTHROPIC_API_KEY : o.provider === "openai" ? io.env.OPENAI_API_KEY : undefined) });
       return g;
     })();
+
+  // A saved prompt (.forge/prompts/<name>.md) can be invoked as: forge-code run "/name arguments"
+  const slash = expandPrompt(o.prompt, await loadPrompts(promptFs, `${root}/.forge/prompts`));
+  if (slash) {
+    o.prompt = slash.prompt;
+    if (!o.json) io.err(`  using saved prompt /${slash.name}\n`);
+  }
 
   const pending = new PendingChanges({ fs: diskFs, checkpoints: new InMemoryCheckpointStore(), mode: () => "review" });
   const sink: EditSink = {

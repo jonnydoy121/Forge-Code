@@ -10,6 +10,7 @@
     "@forge/tool-host": "*",
     "@forge/review": "*",
     "@forge/checkpoints": "*",
-    "@forge/agent-runtime": "*"
+    "@forge/agent-runtime": "*",
+    "@forge/context-store": "*"
   }
 }

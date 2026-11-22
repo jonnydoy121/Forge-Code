@@ -7,6 +7,7 @@ export * from "./lint";
 export * from "./memory";
 export * from "./docs";
 export * from "./sessions";
+export * from "./prompts";
 export * from "./tools";
 
 /** ContextStore contract over a RuleEngine: the protocol's `rulesFor(path)`. */

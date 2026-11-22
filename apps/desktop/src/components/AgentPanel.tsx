@@ -6,7 +6,7 @@ import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { createSession } from "../lib/agentSession";
 import { fsApi, indexBackend } from "../lib/ipc";
 import { attachmentKey, attachmentLabel, resolveAttachment, type Attachment } from "../lib/attachments";
-import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord } from "@forge/context-store";
+import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord, type SavedPrompt, expandPrompt, matchPrompts } from "@forge/context-store";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
@@ -87,6 +87,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [attachKind, setAttachKind] = useState<Attachment["kind"] | "">("");
   const [attachArg, setAttachArg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [prompts, setPrompts] = useState<SavedPrompt[]>([]);
   const [meter, setMeter] = useState<{ total: number; entries: MeterEntry[]; calibrated: boolean } | null>(null);
   const [correction, setCorrection] = useState<Correction | null>(null);
   const [newThread, setNewThread] = useState<string | null>(null);
@@ -115,6 +116,9 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   useEffect(() => {
     bottom.current?.scrollIntoView?.({ block: "end" });
   }, [items]);
+  useEffect(() => {
+    if (services) void services.prompts().then(setPrompts).catch(() => setPrompts([]));
+  }, [services, version]);
   useEffect(() => {
     runtime.current?.terminate?.();
     runtime.current = null; // new workspace or settings: build a fresh session on next send
@@ -155,7 +159,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
 
   async function send(override?: { prompt: string; mode?: Mode; skipSuggest?: boolean }): Promise<RunOutcome> {
     const outcome: RunOutcome = {};
-    const prompt = (override?.prompt ?? input).trim();
+    let prompt = (override?.prompt ?? input).trim();
+    // A saved prompt (.forge/prompts/<name>.md) invoked as /name args: send what it expands to.
+    const slash = !override ? expandPrompt(prompt, prompts) : null;
+    if (slash) prompt = slash.prompt;
     const runMode = override?.mode ?? mode;
     if (!prompt || busy || !root || !services) return outcome;
     if (!override && external) return runExternal(prompt);
@@ -607,6 +614,18 @@ ${diff}`);
             </>
           )}
         </div>
+        {matchPrompts(input, prompts).length > 0 && (
+          <ul className="mb-1 max-h-32 overflow-auto rounded border border-[var(--border)] bg-[var(--panel)] text-xs" data-testid="prompt-suggestions" aria-label="Saved prompts">
+            {matchPrompts(input, prompts).map((p) => (
+              <li key={p.name}>
+                <button className="flex w-full gap-2 px-2 py-1 text-left hover:bg-[var(--hover)]" data-testid={`prompt-${p.name}`} onClick={() => setInput(`/${p.name} `)}>
+                  <span className="font-mono">/{p.name}</span>
+                  <span className="truncate text-[var(--muted)]">{p.description}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <textarea
           data-testid="agent-input"
           rows={3}
@@ -616,7 +635,11 @@ ${diff}`);
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            const options = matchPrompts(input, prompts);
+            if (e.key === "Tab" && !e.shiftKey && options.length > 0) {
+              e.preventDefault();
+              setInput(`/${options[0]!.name} `);
+            } else if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void send();
             } else if (e.key === "Tab" && e.shiftKey) {

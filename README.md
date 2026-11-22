@@ -46,6 +46,9 @@ node target/cli/forge-code.cjs run "..." --model llama3.1 --apply               
 ```
 `--json` gives a machine-readable result; exit code 2 means it stopped at a step or cost limit.
 
+## Saved prompts
+Put reusable prompts in `.forge/prompts/<name>.md` (optional `description:` front matter; `$ARGUMENTS` is replaced by what follows the command). In the app type `/` to pick one; on the command line run `forge-code run "/name args"`. Commit the folder to share workflows with your team.
+
 ## Layout
 `apps/desktop` (Tauri + React), `crates/forge-core` (Rust: filesystem, index, sandbox, secrets), `packages/*` (TypeScript:
 agent runtime, model gateway, tools, review, verification, safety, MCP, ACP). Rules for agents working in this repo are

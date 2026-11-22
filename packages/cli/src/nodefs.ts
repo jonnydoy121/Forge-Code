@@ -20,6 +20,12 @@ export const diskFs: DiskFs = {
   remove: (p) => rm(p, { force: true }),
 };
 
+/** Saved prompts (.forge/prompts): file names in a folder, and file contents. */
+export const promptFs = {
+  read: diskFs.read,
+  list: (dir: string) => readdir(dir),
+};
+
 /** What the read tools (read_file, ls, grep) see. */
 export const toolFs: FsBackend = {
   readFile: (p) => readFile(p, "utf8"),
