@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+### Performance pass (measured; details and rejected ideas in docs/PERFORMANCE.md)
+- Startup JavaScript 3,971 KB -> 355 KB (-91%): the Monaco editor engine (3.3 MB) now loads on first file open and is warmed in the background after a workspace opens; the terminal (xterm.js) and the review, plan and context views load when first shown. Real release window, median of 5: DOM ready 153 -> 26 ms, first paint 216 -> 112 ms, shell mounted 278 -> 118 ms. Steady-state memory is essentially unchanged (380 -> 374 MB) because the editor loads moments after startup anyway.
+- Rust release profile (LTO, one codegen unit, stripped; panics still unwind): executable 36.4 -> 34.5 MB, and most index operations 10-15% faster.
+- Semantic search on 480,240 chunks 138 -> 7 ms (about 19x): bounded per-thread top-k instead of scoring-and-sorting every chunk, and a vectorisable dot product. Tests prove it equals the old ranking.
+- Removed a one-second localStorage poll in the UI (settings changes are now an event).
+- `scripts/perf-startup.mjs` measures the real release app (startup, memory, idle CPU) so these numbers can be repeated.
+- Tried and removed because they did not help when measured: a parallel directory walk, and per-frame batching of streamed text.
+- Also fixed: ESLint now ignores generated `dist-ts` output.
+
 ### Skills, part 2: typed scripts, personal skills, a panel
 - **Typed scripts.** A skill can declare its scripts' arguments in `tools.json` (`{ "bump.js": { "description", "parameters": { JSON-schema subset } } }`). The model sees the declared usage in `use_skill`, and `run_skill_script` validates the arguments (required, type, enum, length, min/max, optional `additionalProperties: false`) before anything runs, answering with exactly what was expected. A broken `tools.json` is reported (in `use_skill` and in the panel) instead of being silently ignored, and an unreadable declaration is not enforced. Undeclared scripts still accept any arguments. Deliberately a single `run_skill_script` entry point rather than dynamically registered tools, so the tool list does not grow with the number of skills.
 - **Personal skills** from `~/.forge/skills` (the CLI reads `HOME`/`USERPROFILE`), merged with the repository's; a repository skill wins over a personal one of the same name. The audit log says which kind ran. A personal script lives outside the workspace, so in the OS sandbox it cannot be read and fails closed with the sandbox's own explanation (a note, not a silent skip).

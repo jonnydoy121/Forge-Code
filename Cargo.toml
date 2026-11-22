@@ -1,3 +1,11 @@
 [workspace]
 resolver = "2"
 members = ["crates/forge-core", "apps/desktop/src-tauri"]
+
+[profile.release]
+# Speed first: whole-program optimisation, one codegen unit, no symbols. Panics still unwind, so a crash in one worker
+# thread (indexer, file watcher) cannot take the whole editor down.
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = true

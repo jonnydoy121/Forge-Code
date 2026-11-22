@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings, sendsCodeOffMachine } from "./settings";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_SETTINGS, loadSettings, onSettingsChange, saveSettings, sendsCodeOffMachine } from "./settings";
 
 const memory = () => {
   const m = new Map<string, string>();
@@ -31,5 +31,26 @@ describe("api key storage", () => {
     saveSettings({ ...DEFAULT_SETTINGS, apiKey: "sk-ant-api03-abcdefghijklmnopqrstuvwx" }, s);
     expect(s.getItem("forge.settings.v1")).not.toContain("sk-ant");
     expect(loadSettings(s).apiKey).toBe("");
+  });
+});
+
+describe("settings change notification", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("tells listeners when settings are saved, so nothing has to poll", () => {
+    vi.stubGlobal("window", new EventTarget());
+    let calls = 0;
+    const off = onSettingsChange(() => calls++);
+    saveSettings({ ...DEFAULT_SETTINGS, localOnly: true }, memory());
+    saveSettings({ ...DEFAULT_SETTINGS, localOnly: false }, memory());
+    expect(calls).toBe(2);
+    off();
+    saveSettings(DEFAULT_SETTINGS, memory());
+    expect(calls).toBe(2); // unsubscribed
+  });
+
+  it("is a no-op outside a browser", () => {
+    expect(() => onSettingsChange(() => {})()).not.toThrow();
+    expect(() => saveSettings(DEFAULT_SETTINGS, memory())).not.toThrow();
   });
 });

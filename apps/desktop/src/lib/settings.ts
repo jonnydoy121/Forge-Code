@@ -79,9 +79,20 @@ export function loadSettings(storage: StorageLike = localStorage): AgentSettings
   }
 }
 
+export const SETTINGS_EVENT = "forge-settings";
+
 export function saveSettings(s: AgentSettings, storage: StorageLike = localStorage) {
   // The API key is kept in the OS credential store, never in local storage.
   storage.setItem(KEY, JSON.stringify({ ...s, apiKey: "" }));
+  // Tell the rest of the app instead of making it poll for changes.
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(SETTINGS_EVENT));
+}
+
+/** Run `cb` whenever settings are saved. Returns the unsubscribe function. */
+export function onSettingsChange(cb: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(SETTINGS_EVENT, cb);
+  return () => window.removeEventListener(SETTINGS_EVENT, cb);
 }
 
 /** True when a request with these settings would leave the machine. */

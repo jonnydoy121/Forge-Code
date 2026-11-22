@@ -15,7 +15,7 @@ review, everything is reversible, and your code stays on your machine unless you
 - **Parallel, isolated agents.** Several agent threads at once; an isolated thread gets its own git worktree and branch, and you merge or discard it.
 - **Optional inline completions.** Ghost text as you type, off by default and clear about what it sends.
 - **Any model, any agent.** Anthropic, OpenAI-compatible and local (Ollama) models; MCP servers; ACP agents.
-- **Fast on big repos.** Tree-sitter index, repo map and semantic search; a 120,000-file repo indexes in about 6 s.
+- **Fast.** The window is interactive in about 0.1 s (only 355 KB of JavaScript at startup); a 120,000-file repo indexes in about 5 s and a semantic search over it takes about 7 ms. Measurements and method: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Status
 Windows is the verified platform (build, installer, and a 24-test end-to-end suite that drives the real window).

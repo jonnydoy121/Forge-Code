@@ -3,15 +3,18 @@ import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Editor } from "./components/Editor";
 import { FileTree } from "./components/FileTree";
 import { TabBar } from "./components/TabBar";
-import { Terminal } from "./components/Terminal";
 import { CommandPalette } from "./components/CommandPalette";
 import { AgentPanel } from "./components/AgentPanel";
-import { ReviewPane } from "./components/ReviewPane";
 import { PermissionPrompt } from "./components/PermissionPrompt";
-import { PlanPane } from "./components/PlanPane";
 import { Welcome, needsOnboarding } from "./components/Welcome";
-import { ContextPane } from "./components/ContextPane";
 import { AddFilePrompt, QuestionPrompt } from "./components/Prompts";
+import { lazyView } from "./lib/lazyView";
+
+// Loaded the first time they are shown, not at startup (the terminal alone pulls in xterm.js).
+const Terminal = lazyView(() => import("./components/Terminal"), "Terminal");
+const ReviewPane = lazyView(() => import("./components/ReviewPane"), "ReviewPane");
+const PlanPane = lazyView(() => import("./components/PlanPane"), "PlanPane");
+const ContextPane = lazyView(() => import("./components/ContextPane"), "ContextPane");
 import { PlanExecutor, type Question } from "@forge/plans";
 import type { RunOutcome } from "./components/AgentPanel";
 import type { AskRequest, Remember } from "@forge/safety";
@@ -19,14 +22,14 @@ import type { Mode } from "@forge/protocol";
 import type { ReviewMode } from "@forge/review";
 import { createThreadWorktree, mergeThread, removeThread, threadSummary } from "./lib/worktree";
 import { createWorkspaceServices, diskFs, git, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
-import { loadSettings } from "./lib/settings";
+import { loadSettings, onSettingsChange } from "./lib/settings";
 import { loadApiKey } from "./lib/secrets";
 import { completeOnce, completeShort } from "./lib/agentSession";
 import { buildCompletionPrompt, cleanCompletion, shouldComplete } from "./lib/completion";
 import { buildInlinePrompt, extractReplacement, spliceSelection, type InlineContext } from "./lib/inlineEdit";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
-import { applyDiagnostics, clearPendingDecorations, errorMarkers, disposeDoc, getDoc, isDirty, openDoc, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
+import { applyDiagnostics, clearPendingDecorations, errorMarkers, disposeDoc, getDoc, isDirty, openDoc, preloadMonaco, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
 import { LspManager, serverKeyFor, type ServerKey, type ServerStatus } from "./lib/lspManager";
 import { initialTabs, tabsReducer } from "./lib/tabs";
 import { matchesKeybinding, type Command } from "./lib/commands";
@@ -89,10 +92,10 @@ export function App() {
       indexApi.onUpdated(() => void indexApi.status().then((status) => setIndexInfo((i) => ({ ...i, status })))),
     ];
     void invoke<string>("sandbox_status").then(setSandboxMode).catch(() => {});
-    const poll = setInterval(() => setLocalOnly(loadSettings().localOnly), 1000);
+    const unwatchSettings = onSettingsChange(() => setLocalOnly(loadSettings().localOnly));
     fsApi.initialWorkspace().then((w) => w && void openFolder(w)).catch(() => {});
     return () => {
-      clearInterval(poll);
+      unwatchSettings();
       for (const s of subs) void s.then((unlisten) => unlisten());
     };
   }, []);
@@ -192,6 +195,7 @@ export function App() {
     rootRef.current = dir;
     const svc = await makeServices(dir);
     setServices(svc);
+    preloadMonaco(); // warm the editor engine in the background so the first file opens instantly
     void diskFs.list(`${dir}/.forge/worktrees`).then((names) => names.length > 0 && setThreadMsg(`Unmerged thread checkouts from an earlier session: ${names.join(", ")} (branches forge/<name>). Merge or remove them with git; they are not reopened as threads.`)).catch(() => {});
     if (svc.hookErrors.length) setNotice(`.forge/hooks.json: ${svc.hookErrors.join("; ")}`);
     void svc.proposeCommandsSection().catch(() => {});

@@ -639,12 +639,43 @@ impl Index {
         let q = self.embedder.embed(query);
         let qr = &q;
         let st = self.state.read().unwrap();
-        let mut scored: Vec<(f32, &String, &ChunkMeta)> = st
+        // Each thread keeps only its best k (a bounded set), then the sets are merged: no list of every chunk's score
+        // is ever built or sorted.
+        type Cand<'a> = (f32, &'a String, &'a ChunkMeta);
+        let by_rank = |a: &Cand, b: &Cand| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(b.1));
+        let keep = k.max(1);
+        let mut scored: Vec<Cand> = st
             .files
             .par_iter()
-            .flat_map_iter(|(path, f)| f.parsed.chunks.iter().zip(&f.vecs).map(move |(c, v)| (cosine(qr, v), path, c)))
-            .collect();
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(b.1)));
+            .fold(
+                || (Vec::<Cand>::with_capacity(keep), f32::MIN),
+                |(mut top, mut floor), (path, f)| {
+                    for (c, v) in f.parsed.chunks.iter().zip(&f.vecs) {
+                        let s = cosine(qr, v);
+                        if s <= 0.0 || (top.len() >= keep && s <= floor) {
+                            continue;
+                        }
+                        if top.len() < keep {
+                            top.push((s, path, c));
+                            if top.len() == keep {
+                                floor = top.iter().map(|t| t.0).fold(f32::MAX, f32::min);
+                            }
+                        } else if let Some(worst) = top.iter().enumerate().min_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap_or(std::cmp::Ordering::Equal)).map(|(i, _)| i) {
+                            top[worst] = (s, path, c);
+                            floor = top.iter().map(|t| t.0).fold(f32::MAX, f32::min);
+                        }
+                    }
+                    (top, floor)
+                },
+            )
+            .map(|(top, _)| top)
+            .reduce(Vec::new, |mut a, b| {
+                a.extend(b);
+                a.sort_by(by_rank);
+                a.truncate(keep);
+                a
+            });
+        scored.sort_by(by_rank);
         scored.truncate(k);
         let hits: Vec<(f32, String, u32, u32)> = scored.into_iter().filter(|s| s.0 > 0.0).map(|(s, p, c)| (s, p.clone(), c.start, c.end)).collect();
         drop(st);

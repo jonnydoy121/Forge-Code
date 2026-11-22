@@ -204,3 +204,24 @@ fn nested_globs_match_deep_paths() {
     assert_eq!(files("**/program.ts").len(), 2);
     assert_eq!(files("src/compiler/**").len(), 1);
 }
+
+#[test]
+fn bounded_top_k_matches_the_start_of_the_full_ranking() {
+    let repo = tempfile::tempdir().unwrap();
+    for i in 0..80 {
+        write(repo.path(), &format!("src/m{i}.ts"), &format!("export function handler{i}(user: string) {{ return user + '{i}' + checkLogin{}(user); }}\n", i % 7));
+    }
+    let db = tempfile::tempdir().unwrap();
+    let idx = open(repo.path(), &db.path().join("i.db"));
+    idx.build(&|_| {}).unwrap();
+    let q = "check login for the user handler";
+    let full = idx.semantic_search(q, 1000);
+    assert!(full.len() > 25, "need enough candidates to make the cut meaningful, got {}", full.len());
+    for k in [1usize, 3, 10, 25] {
+        let top = idx.semantic_search(q, k);
+        assert_eq!(top.len(), k, "k={k}");
+        for (a, b) in top.iter().zip(&full) {
+            assert!((a.score - b.score).abs() < 1e-6, "k={k}: {} vs {}", a.score, b.score);
+        }
+    }
+}

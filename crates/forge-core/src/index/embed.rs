@@ -88,8 +88,25 @@ impl Embedder for HashEmbedder {
     }
 }
 
+/// Dot product (vectors are unit length, so this is the cosine). Eight independent accumulators let the compiler use
+/// SIMD: a plain `.sum()` of floats must add in order, which blocks vectorisation.
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
+    let n = a.len().min(b.len());
+    let (a, b) = (&a[..n], &b[..n]);
+    let ca = a.chunks_exact(8);
+    let cb = b.chunks_exact(8);
+    let (ra, rb) = (ca.remainder(), cb.remainder());
+    let mut acc = [0f32; 8];
+    for (x, y) in ca.zip(cb) {
+        for i in 0..8 {
+            acc[i] += x[i] * y[i];
+        }
+    }
+    let mut sum: f32 = acc.iter().sum();
+    for (x, y) in ra.iter().zip(rb) {
+        sum += x * y;
+    }
+    sum
 }
 
 pub fn to_bytes(v: &[f32]) -> Vec<u8> {
@@ -124,5 +141,22 @@ mod tests {
     fn bytes_roundtrip() {
         let v = HashEmbedder.embed("hello world");
         assert_eq!(from_bytes(&to_bytes(&v)), v);
+    }
+
+    #[test]
+    fn the_unrolled_dot_product_matches_the_naive_one_for_every_length() {
+        // Lengths around the unroll width, including empty, shorter than 8, an exact multiple, and with a remainder.
+        for n in [0usize, 1, 7, 8, 9, 15, 16, 17, 31, 128, 129, 1000] {
+            let a: Vec<f32> = (0..n).map(|i| ((i * 37 % 101) as f32 - 50.0) / 50.0).collect();
+            let b: Vec<f32> = (0..n).map(|i| ((i * 53 % 97) as f32 - 48.0) / 48.0).collect();
+            let naive: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+            assert!((cosine(&a, &b) - naive).abs() < 1e-3, "length {n}: {} vs {naive}", cosine(&a, &b));
+        }
+    }
+
+    #[test]
+    fn mismatched_lengths_use_the_shorter_one_instead_of_panicking() {
+        assert!((cosine(&[1.0, 2.0, 3.0], &[1.0, 1.0]) - 3.0).abs() < 1e-6);
+        assert_eq!(cosine(&[], &[1.0]), 0.0);
     }
 }
