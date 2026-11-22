@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/agent-runtime" },
+    { "path": "packages/model-gateway" },
+    { "path": "packages/indexer" },
+    { "path": "packages/tool-host" },
+    { "path": "packages/checkpoints" },
+    { "path": "packages/context-store" },
+    { "path": "apps/desktop" }
+  ]
+}

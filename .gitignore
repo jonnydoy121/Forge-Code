@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+target/
+.next/
+*.log
+.env
+.env.*
+playwright-report/
+test-results/
+.forge/sessions/
+.forge/checkpoints/
+.forge/index/

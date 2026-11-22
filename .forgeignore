@@ -1,0 +1,12 @@
+# Paths Forge must never index or send to a model (in addition to .gitignore)
+node_modules/
+dist/
+build/
+target/
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+credentials*
+*.p12
