@@ -1,6 +1,7 @@
 // Phase 4 in the real window: agent proposes a multi-file edit, the developer reviews it, a conflict is
 // surfaced instead of overwriting, and checkpoints roll everything back. Needs FORGE_CDP and FORGE_WS.
-import { chromium, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { openWorkspace } from "./helpers";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -36,11 +37,8 @@ test("multi-file rename: review, conflict, accept/reject, rollback", async () =>
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as AddressInfo).port;
 
-  const browser = await chromium.connectOverCDP(cdp!);
-  const page = browser.contexts()[0]!.pages()[0]!;
+  const page = await openWorkspace(ws);
   try {
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
     await page.getByTestId("settings-toggle").click();
     await page.getByTestId("base-url").fill(`http://127.0.0.1:${port}/v1`);
     await expect(page.getByTestId("review-mode")).toHaveValue("review");
@@ -51,6 +49,8 @@ test("multi-file rename: review, conflict, accept/reject, rollback", async () =>
     // The agent proposes edits to two files. Nothing is written to disk yet.
     await page.getByTestId("agent-input").fill("Rename greet to hello everywhere");
     await page.getByTestId("agent-input").press("Enter");
+    // "Rename ... everywhere" looks like a large change, so Forge suggests planning first; carry on in agent mode.
+    await page.getByTestId("suggest-continue").click();
     await expect(page.getByTestId("pending-banner")).toContainText("2 files", { timeout: 20_000 });
     expect(read("c.ts")).toBe(original.c);
     expect(read("use.ts")).toBe(original.use);

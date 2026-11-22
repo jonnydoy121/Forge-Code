@@ -1,6 +1,7 @@
 // Drives the real Tauri window over WebView2's remote-debugging port.
 // Run with: FORGE_CDP=http://127.0.0.1:9222 FORGE_WS=<workspace dir> npm run e2e
-import { chromium, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { openWorkspace } from "./helpers";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -9,8 +10,7 @@ const ws = process.env.FORGE_WS ?? "";
 test.skip(!cdp, "needs a running Forge window (FORGE_CDP)");
 
 test("editor core flow in the real app", async () => {
-  const browser = await chromium.connectOverCDP(cdp!);
-  const page = browser.contexts()[0]!.pages()[0]!;
+  const page = await openWorkspace(ws);
 
   // File tree -> tab -> LSP diagnostics
   await page.getByTestId("tree-a.ts").click();

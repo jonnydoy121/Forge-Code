@@ -1,6 +1,7 @@
 // Drives the agent panel in the real Tauri window against a scripted local OpenAI-compatible server.
 // Run with FORGE_CDP and FORGE_WS set (see AGENTS.md).
-import { chromium, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { openWorkspace } from "./helpers";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -30,11 +31,8 @@ test("ask mode answers using read tools; request carries only read tools; privac
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as AddressInfo).port;
 
-  const browser = await chromium.connectOverCDP(cdp!);
-  const page = browser.contexts()[0]!.pages()[0]!;
+  const page = await openWorkspace(process.env.FORGE_WS!);
   try {
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
     await page.getByTestId("settings-toggle").click();
     await page.getByTestId("base-url").fill(`http://127.0.0.1:${port}/v1`);
     await page.getByTestId("settings-toggle").click();
@@ -49,7 +47,7 @@ test("ask mode answers using read tools; request carries only read tools; privac
     await expect(page.getByTestId("token-meter")).not.toHaveText("0 tokens");
 
     // The model saw the read tools only (ask mode), and the tool result was fed back.
-    expect(requests[0]!.body.tools.map((t: { function: { name: string } }) => t.function.name).sort()).toEqual(["dependency_cone", "grep", "ls", "read_file", "references", "repo_map", "semantic_search", "symbol"]);
+    expect(requests[0]!.body.tools.map((t: { function: { name: string } }) => t.function.name).sort()).toEqual(["ask_user", "dependency_cone", "grep", "ls", "read_file", "references", "repo_map", "semantic_search", "symbol"]);
     // The ranked repo map was attached to the system prompt as context.
     expect(requests[0]!.body.messages[0].content).toContain("Repo map");
     expect(requests[1]!.body.messages.at(-1).role).toBe("tool");
