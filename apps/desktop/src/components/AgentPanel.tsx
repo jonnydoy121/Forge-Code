@@ -445,6 +445,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           </label>
           <label className="block"><input type="checkbox" data-testid="local-only" checked={settings.localOnly} onChange={(e) => update({ localOnly: e.target.checked })} /> Local-only mode: block every request that would leave this machine</label>
           <label className="block"><input type="checkbox" data-testid="sandbox-on" checked={settings.sandbox} onChange={(e) => update({ sandbox: e.target.checked })} /> Run agent commands in the OS sandbox (workspace only, no network)</label>
+          <label className="block"><input type="checkbox" data-testid="completions-toggle" checked={settings.completions} onChange={(e) => update({ completions: e.target.checked })} /> Ghost-text completions while typing (sends the code around your cursor to the model every time you pause{sendsCodeOffMachine(settings) ? "; this provider is NOT on this machine" : ""})</label>
+          {settings.completions && (
+            <label className="block">Completion model (small and fast works best; empty = the agent model)
+              <input className="mt-0.5 w-full rounded bg-neutral-900 px-1" data-testid="completion-model" placeholder={settings.model} value={settings.completionModel} onChange={(e) => update({ completionModel: e.target.value })} />
+            </label>
+          )}
           <label className="block">Embedding model (local Ollama, applies on next workspace open; empty = built-in)
             <input className="mt-0.5 w-full rounded bg-neutral-900 px-1" data-testid="embed-model" placeholder="nomic-embed-text" value={settings.embedModel} onChange={(e) => update({ embedModel: e.target.value })} />
           </label>

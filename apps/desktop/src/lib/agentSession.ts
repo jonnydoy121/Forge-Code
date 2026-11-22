@@ -132,3 +132,17 @@ export async function completeOnce(settings: AgentSettings, services: WorkspaceS
   }
   return text.trim();
 }
+
+/** Short, cancellable completion for ghost text: stops reading as soon as it has `maxChars`, or when aborted. */
+export async function completeShort(settings: AgentSettings, services: WorkspaceServices, prompt: string, signal: AbortSignal, maxChars = 900): Promise<string> {
+  const gateway = makeGateway(services, settings);
+  let text = "";
+  for await (const ev of gateway.stream({ provider: "default", model: settings.completionModel.trim() || settings.model, messages: [{ role: "user", content: prompt }], signal })) {
+    if (signal.aborted) break;
+    if (ev.type === "text") {
+      text += ev.delta;
+      if (text.length >= maxChars) break;
+    }
+  }
+  return text;
+}

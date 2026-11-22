@@ -19,7 +19,8 @@ import type { Mode } from "@forge/protocol";
 import { createWorkspaceServices, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
 import { loadSettings } from "./lib/settings";
 import { loadApiKey } from "./lib/secrets";
-import { completeOnce } from "./lib/agentSession";
+import { completeOnce, completeShort } from "./lib/agentSession";
+import { buildCompletionPrompt, cleanCompletion, shouldComplete } from "./lib/completion";
 import { buildInlinePrompt, extractReplacement, spliceSelection, type InlineContext } from "./lib/inlineEdit";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
@@ -398,6 +399,12 @@ export function App() {
                 lspTimers.current.set(path, setTimeout(() => { const { version, text } = snapshot(); void lsp.current.change(path, language, version, text); }, 200));
               }}
               onCursor={(l, c) => setCursor([l, c])}
+              onComplete={async (c, signal) => {
+                const st = loadSettings();
+                if (!st.completions || !services || !shouldComplete(c)) return "";
+                const reply = await completeShort({ ...st, apiKey: await loadApiKey(st.provider) }, services, buildCompletionPrompt(c), signal);
+                return signal.aborted ? "" : cleanCompletion(reply, c);
+              }}
               onInlineEdit={(ctx) => {
                 const d = getDoc(ctx.path);
                 if (d && isDirty(d)) return setNotice("Save the file first (Ctrl+S): inline edits are proposed against the saved version.");

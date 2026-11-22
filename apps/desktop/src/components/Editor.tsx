@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { getDoc, isDirty, monaco } from "../lib/monaco";
 import type { InlineContext } from "../lib/inlineEdit";
+import type { CompletionContext } from "../lib/completion";
 
 interface Props {
   path: string | null;
@@ -11,15 +12,17 @@ interface Props {
   onCursor: (line: number, col: number) => void;
   /** Alt+I or the context menu: edit the selection (or insert at the cursor) from an instruction. */
   onInlineEdit?: (ctx: InlineContext) => void;
+  /** ghost-text completion at the cursor; resolves to "" for nothing. Aborted when the user keeps typing. */
+  onComplete?: (ctx: CompletionContext, signal: AbortSignal) => Promise<string>;
 }
 
-export function Editor({ path, dark, onDirty, onChange, onCursor, onInlineEdit }: Props) {
+export function Editor({ path, dark, onDirty, onChange, onCursor, onInlineEdit, onComplete }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const views = useRef(new Map<string, monaco.editor.ICodeEditorViewState | null>());
   const current = useRef<string | null>(null);
-  const cb = useRef({ onDirty, onChange, onCursor, onInlineEdit });
-  cb.current = { onDirty, onChange, onCursor, onInlineEdit };
+  const cb = useRef({ onDirty, onChange, onCursor, onInlineEdit, onComplete });
+  cb.current = { onDirty, onChange, onCursor, onInlineEdit, onComplete };
 
   useEffect(() => {
     const ed = monaco.editor.create(host.current!, { automaticLayout: true, minimap: { enabled: false }, fontSize: 14, model: null });
@@ -44,8 +47,28 @@ export function Editor({ path, dark, onDirty, onChange, onCursor, onInlineEdit }
         cb.current.onInlineEdit({ path: p, language: model.getLanguageId(), text: model.getValue(), start: model.getOffsetAt(sel.getStartPosition()), end: model.getOffsetAt(sel.getEndPosition()) });
       },
     });
+    // Ghost-text completions. Registered once; it asks the app, which decides whether the feature is on.
+    const provider = monaco.languages.registerInlineCompletionsProvider("*", {
+      async provideInlineCompletions(model, position, _ctx, token) {
+        const ask = cb.current.onComplete;
+        if (!ask || model !== ed.getModel()) return { items: [] };
+        await new Promise((r) => setTimeout(r, 350)); // debounce: only complete when typing pauses
+        if (token.isCancellationRequested) return { items: [] };
+        const abort = new AbortController();
+        token.onCancellationRequested(() => abort.abort());
+        const offset = model.getOffsetAt(position);
+        const text = model.getValue();
+        const insert = await ask({ path: current.current ?? "", language: model.getLanguageId(), prefix: text.slice(0, offset), suffix: text.slice(offset) }, abort.signal).catch(() => "");
+        if (!insert || token.isCancellationRequested) return { items: [] };
+        return { items: [{ insertText: insert, range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column) }] };
+      },
+      freeInlineCompletions() {},
+    });
     ed.onDidChangeCursorPosition((e) => cb.current.onCursor(e.position.lineNumber, e.position.column));
-    return () => ed.dispose();
+    return () => {
+      provider.dispose();
+      ed.dispose();
+    };
   }, []);
 
   useEffect(() => {

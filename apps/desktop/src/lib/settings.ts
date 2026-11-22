@@ -25,6 +25,10 @@ export interface AgentSettings {
   toolchainRead: boolean;
   /** local embedding model (Ollama), e.g. nomic-embed-text; empty = the built-in lexical embedder */
   embedModel: string;
+  /** ghost-text completions while typing: sends the code around the cursor to the model provider */
+  completions: boolean;
+  /** model used for completions (a small fast one is best); empty = the agent model */
+  completionModel: string;
   /** run the agent loop in its own OS process (falls back to a Web Worker if it cannot start) */
   runtimeProcess: boolean;
   /** embedding server, must be on this machine */
@@ -55,6 +59,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   sandbox: true,
   toolchainRead: true,
   embedModel: "",
+  completions: false,
+  completionModel: "",
   runtimeProcess: true,
   embedUrl: "http://127.0.0.1:11434",
   maxSeconds: 1800,
