@@ -17,7 +17,7 @@ review, everything is reversible, and your code stays on your machine unless you
 
 ## Status
 Windows is the verified platform (build, installer, and a 24-test end-to-end suite that drives the real window).
-CI is configured for Windows, macOS and Linux; macOS and Linux have not been exercised by a person. Screen-reader support is covered by automated
+CI is green on Windows, macOS and Linux (lint, typecheck, unit tests, Rust tests, build); the real-window end-to-end suite runs on Windows only, and macOS and Linux have not been exercised by a person. Screen-reader support is covered by automated
 accessibility checks only. See [CHANGELOG.md](CHANGELOG.md), [ARCHITECTURE.md](ARCHITECTURE.md) and
 [docs/RESEARCH.md](docs/RESEARCH.md) (competitive research and roadmap).
 
