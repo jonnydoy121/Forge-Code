@@ -4,6 +4,7 @@
 ### Remaining-gaps follow-up
 - Pending changes persist across restarts (.forge/pending, restored with reasons, decisions and change sets; the normal conflict check still runs on accept).
 - The agent loop (context assembly, compaction, redaction, limits, verify-fix feedback) runs in a Web Worker behind a typed message protocol (`agent-runtime/src/remote.ts`); files, HTTP, permissions, hooks, verification and indexing stay on the main thread and are served to the worker. Falls back to in-process when Workers are unavailable. This is a thread boundary, not an OS process: no Node sidecar is bundled.
+- Neural embeddings: optional local Ollama-compatible embedder (`Embedding model` setting, loopback only, probes the vector size, falls back to the built-in lexical embedder with a notice, zero vectors on a later outage). Verified against a mock server, including a case the lexical embedder cannot answer; not yet run against a real Ollama (none installed here).
 - Indexer: bounded in-memory content cache. On a synthetic 120,000-file / 960k-line repo: first index 5.8 s (background, search usable during it), warm grep about 10 ms (was 1.07 s), symbol lookup under 1 ms, incremental reindex 15 ms. The first search after launch is cold (about 1 s) while the cache fills.
 ### Security follow-up
 - API keys now live in the OS credential store (Windows Credential Manager via the keyring crate), per provider; existing keys in local storage are migrated and settings never persist them.

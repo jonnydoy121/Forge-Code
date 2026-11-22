@@ -420,6 +420,9 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           </label>
           <label className="block"><input type="checkbox" data-testid="local-only" checked={settings.localOnly} onChange={(e) => update({ localOnly: e.target.checked })} /> Local-only mode: block every request that would leave this machine</label>
           <label className="block"><input type="checkbox" data-testid="sandbox-on" checked={settings.sandbox} onChange={(e) => update({ sandbox: e.target.checked })} /> Run agent commands in the OS sandbox (workspace only, no network)</label>
+          <label className="block">Embedding model (local Ollama, applies on next workspace open; empty = built-in)
+            <input className="mt-0.5 w-full rounded bg-neutral-900 px-1" data-testid="embed-model" placeholder="nomic-embed-text" value={settings.embedModel} onChange={(e) => update({ embedModel: e.target.value })} />
+          </label>
           <label className="block"><input type="checkbox" checked={settings.toolchainRead} onChange={(e) => update({ toolchainRead: e.target.checked })} /> Let the sandbox read tool folders on PATH (adds read-only access for node, git, ...)</label>
           <label className="block">Max minutes per run <input type="number" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /></label>
           <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>

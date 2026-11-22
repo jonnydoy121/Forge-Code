@@ -23,6 +23,10 @@ export interface AgentSettings {
   sandbox: boolean;
   /** let the sandbox read tool directories on PATH (node, git, ...) so project tools run */
   toolchainRead: boolean;
+  /** local embedding model (Ollama), e.g. nomic-embed-text; empty = the built-in lexical embedder */
+  embedModel: string;
+  /** embedding server, must be on this machine */
+  embedUrl: string;
   /** wall-clock seconds for one agent run */
   maxSeconds: number;
 }
@@ -48,6 +52,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   localOnly: false,
   sandbox: true,
   toolchainRead: true,
+  embedModel: "",
+  embedUrl: "http://127.0.0.1:11434",
   maxSeconds: 1800,
 };
 

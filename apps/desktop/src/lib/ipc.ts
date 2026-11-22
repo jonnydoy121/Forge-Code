@@ -44,7 +44,7 @@ export interface IndexStatus {
 }
 
 export const indexApi = {
-  start: (root: string) => invoke<void>("index_start", { root }),
+  start: (root: string, embedModel?: string, embedUrl?: string) => invoke<string>("index_start", { root, embedModel: embedModel || null, embedUrl: embedUrl || null }),
   status: () => invoke<IndexStatus>("index_status"),
   onProgress: (cb: (p: { phase: string; done: number; total: number }) => void): Promise<UnlistenFn> => listen<{ phase: string; done: number; total: number }>("index-progress", (e) => cb(e.payload)),
   onBuilt: (cb: () => void): Promise<UnlistenFn> => listen("index-built", () => cb()),

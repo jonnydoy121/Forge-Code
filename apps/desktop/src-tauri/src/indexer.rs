@@ -1,4 +1,6 @@
 use forge_core::index::{BuildStats, ChunkHit, Cone, GrepHit, Index, RefHit, Status, SymbolHit};
+use forge_core::index::embed::{Embedder, HashEmbedder};
+use forge_core::index::embed_http::HttpEmbedder;
 use notify::RecommendedWatcher;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -16,11 +18,19 @@ fn get(state: &State<IndexState>) -> Result<Arc<Index>, String> {
 
 /// Open (or create) the workspace index and build it in the background. Editing and search stay usable meanwhile.
 #[tauri::command]
-pub fn index_start(app: AppHandle, state: State<IndexState>, root: String) -> Result<(), String> {
+pub fn index_start(app: AppHandle, state: State<IndexState>, root: String, embed_model: Option<String>, embed_url: Option<String>) -> Result<String, String> {
     *state.watcher.lock().unwrap() = None;
     let root_path = Path::new(&root);
     let db = root_path.join(".forge").join("index").join("index.db");
-    let idx = Arc::new(Index::open(root_path, &db)?);
+    // Neural embeddings from a local Ollama-compatible server when configured and reachable; otherwise the built-in lexical embedder.
+    let (embedder, which): (Box<dyn Embedder>, String) = match embed_model.filter(|m| !m.trim().is_empty()) {
+        Some(model) => match HttpEmbedder::connect(embed_url.as_deref().unwrap_or("http://127.0.0.1:11434"), model.trim()) {
+            Ok(e) => (Box::new(e), format!("neural ({})", model.trim())),
+            Err(err) => (Box::new(HashEmbedder), format!("built-in (neural embeddings unavailable: {err})")),
+        },
+        None => (Box::new(HashEmbedder), "built-in".to_string()),
+    };
+    let idx = Arc::new(Index::open_with(root_path, &db, embedder)?);
     *state.idx.lock().unwrap() = Some(Arc::clone(&idx));
     let bg = Arc::clone(&idx);
     let app2 = app.clone();
@@ -35,7 +45,7 @@ pub fn index_start(app: AppHandle, state: State<IndexState>, root: String) -> Re
         let _ = app3.emit("index-updated", files);
     })?;
     *state.watcher.lock().unwrap() = Some(w);
-    Ok(())
+    Ok(which)
 }
 
 #[tauri::command]

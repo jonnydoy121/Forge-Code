@@ -3,6 +3,7 @@
 
 pub mod cache;
 pub mod embed;
+pub mod embed_http;
 pub mod graph;
 pub mod merkle;
 pub mod parse;

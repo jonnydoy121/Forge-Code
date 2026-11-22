@@ -116,7 +116,11 @@ export function App() {
     void svc.proposeCommandsSection().catch(() => {});
     void svc.plans.list().then((l) => setActivePlan(l[0]?.slug ?? null));
     setIndexInfo({ progress: "starting" });
-    indexApi.start(dir).catch((e) => setNotice(`Indexer failed: ${e}`));
+    const st = loadSettings();
+    indexApi
+      .start(dir, st.embedModel, st.embedUrl)
+      .then((which) => which.includes("unavailable") && setNotice(`Semantic search is using the ${which}`))
+      .catch((e) => setNotice(`Indexer failed: ${e}`));
   }
 
   /** After agent runs, accepts and rollbacks: pull changed files from disk into open editors. */
