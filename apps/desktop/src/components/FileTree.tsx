@@ -42,8 +42,11 @@ export function FileTree({ root, activePath, onOpen }: Props) {
 
   const render = (dir: string, depth: number): React.ReactNode =>
     (children[dir] ?? []).map((e) => (
-      <div key={e.path}>
+      <div key={e.path} role="none">
         <button
+          role="treeitem"
+          aria-expanded={e.is_dir ? expanded.has(e.path) : undefined}
+          aria-selected={activePath === e.path}
           className={`flex w-full items-center gap-1 truncate px-2 py-0.5 text-left text-sm hover:bg-[var(--hover)] ${activePath === e.path ? "bg-[var(--hover)]" : ""}`}
           style={{ paddingLeft: 8 + depth * 12 }}
           onClick={() => (e.is_dir ? toggle(e.path) : onOpen(e.path))}
@@ -52,7 +55,7 @@ export function FileTree({ root, activePath, onOpen }: Props) {
           <span className="w-3 text-[var(--muted)]">{e.is_dir ? (expanded.has(e.path) ? "v" : ">") : ""}</span>
           <span className="truncate">{e.name}</span>
         </button>
-        {e.is_dir && expanded.has(e.path) && render(e.path, depth + 1)}
+        {e.is_dir && expanded.has(e.path) && <div role="group">{render(e.path, depth + 1)}</div>}
       </div>
     ));
 

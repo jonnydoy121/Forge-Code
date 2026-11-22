@@ -45,7 +45,7 @@ export function CommandPalette({ commands, onClose }: Props) {
             else if (e.key === "Enter") run(results[index]);
           }}
         />
-        <ul className="max-h-72 overflow-auto border-t border-[var(--border)]" role="listbox">
+        <ul className="max-h-72 overflow-auto border-t border-[var(--border)]" role="listbox" aria-label="Commands" tabIndex={0}>
           {results.map((c, i) => (
             <li
               key={c.id}

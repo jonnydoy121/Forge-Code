@@ -9,6 +9,7 @@ import { AgentPanel } from "./components/AgentPanel";
 import { ReviewPane } from "./components/ReviewPane";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { PlanPane } from "./components/PlanPane";
+import { Welcome, needsOnboarding } from "./components/Welcome";
 import { ContextPane } from "./components/ContextPane";
 import { AddFilePrompt, QuestionPrompt } from "./components/Prompts";
 import { PlanExecutor, type Question } from "@forge/plans";
@@ -50,12 +51,14 @@ export function App() {
   const buildAbort = useRef<AbortController | null>(null);
   const [questionReq, setQuestionReq] = useState<{ questions: Question[]; resolve: (a: string[]) => void } | null>(null);
   const [addFileReq, setAddFileReq] = useState<{ question: string; path: string; resolve: (b: boolean) => void } | null>(null);
+  const [welcome, setWelcome] = useState(needsOnboarding);
   const [report, setReport] = useState<ReportEvent | null>(null);
   const [sandboxMode, setSandboxMode] = useState<string>("");
   const [localOnly, setLocalOnly] = useState(() => loadSettings().localOnly);
   const [permission, setPermission] = useState<{ req: AskRequest; resolve: (a: Remember) => void } | null>(null);
   const rootRef = useRef<string | null>(null);
   const lsp = useRef(new LspManager());
+  const lspTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     lsp.current.onDiagnostics((uri, diags) => {
@@ -212,6 +215,7 @@ export function App() {
       { id: "save", title: "File: Save", keybinding: "Ctrl+S", run: () => void save() },
       { id: "close-tab", title: "View: Close Editor", keybinding: "Ctrl+W", run: () => tabs.active && void closeTab(tabs.active) },
       { id: "terminal", title: "View: Toggle Terminal", keybinding: "Ctrl+`", run: () => toggleTerminal() },
+      { id: "welcome", title: "Help: Welcome and privacy setup", run: () => setWelcome(true) },
       { id: "context", title: "View: Context (rules, memories, docs)", keybinding: "Ctrl+Shift+K", run: () => setView((v) => (v === "context" ? "editor" : "context")) },
       { id: "plan", title: "View: Show Plan", keybinding: "Ctrl+Shift+L", run: () => setView((v) => (v === "plan" ? "editor" : "plan")) },
       { id: "review", title: "View: Review Pending Changes", keybinding: "Ctrl+Shift+R", run: () => setView((v) => (v === "review" ? "editor" : "review")) },
@@ -327,7 +331,10 @@ export function App() {
               path={tabs.active}
               dark={dark}
               onDirty={(path, dirty) => dispatch({ type: "dirty", path, dirty })}
-              onChange={(path, language, version, text) => void lsp.current.change(path, language, version, text)}
+              onChange={(path, language, snapshot) => {
+                clearTimeout(lspTimers.current.get(path));
+                lspTimers.current.set(path, setTimeout(() => { const { version, text } = snapshot(); void lsp.current.change(path, language, version, text); }, 200));
+              }}
               onCursor={(l, c) => setCursor([l, c])}
             />
           </div>
@@ -400,6 +407,7 @@ export function App() {
           }}
         />
       )}
+      {welcome && <Welcome onDone={() => setWelcome(false)} onOpenFolder={() => void chooseFolder()} />}
       {permission && (
         <PermissionPrompt
           req={permission.req}

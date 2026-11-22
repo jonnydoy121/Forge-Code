@@ -70,7 +70,7 @@ async function scripted(turns: object[][]) {
 async function open(port: number, dir: string) {
   const browser = await chromium.connectOverCDP(cdp!);
   const page = browser.contexts()[0]!.pages()[0]!;
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("forge.onboarded.v1", "1"); });
   await page.reload();
   await expect(page.getByTestId("index-status")).toContainText(/Indexed/, { timeout: 60_000 });
   await page.evaluate((d) => (window as unknown as { __forge: { openFolder: (x: string) => Promise<void> } }).__forge.openFolder(d), dir);

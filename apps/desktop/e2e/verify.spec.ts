@@ -53,7 +53,7 @@ async function scriptedServer(turns: object[][]) {
 async function setup(port: number, dir: string, reviewMode: "auto" | "review") {
   const browser = await chromium.connectOverCDP(cdp!);
   const page = browser.contexts()[0]!.pages()[0]!;
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("forge.onboarded.v1", "1"); });
   await page.reload();
   // After a reload the app re-opens the launch workspace asynchronously; let that finish before switching,
   // otherwise it would overwrite the project we are about to open.

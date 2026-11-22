@@ -7,7 +7,7 @@ import { chromium, expect, type Page } from "@playwright/test";
 export async function openWorkspace(dir: string): Promise<Page> {
   const browser = await chromium.connectOverCDP(process.env.FORGE_CDP!);
   const page = browser.contexts()[0]!.pages()[0]!;
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem("forge.onboarded.v1", "1"); });
   await page.reload();
   await expect(page.getByTestId("index-status")).toContainText(/Indexed/, { timeout: 60_000 });
   const d = dir.split("\\").join("/");

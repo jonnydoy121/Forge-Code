@@ -5,7 +5,8 @@ interface Props {
   path: string | null;
   dark: boolean;
   onDirty: (path: string, dirty: boolean) => void;
-  onChange: (path: string, language: string, version: number, text: string) => void;
+  /** Called on every edit with a lazy snapshot, so large files are not serialised per keystroke. */
+  onChange: (path: string, language: string, snapshot: () => { version: number; text: string }) => void;
   onCursor: (line: number, col: number) => void;
 }
 
@@ -25,7 +26,7 @@ export function Editor({ path, dark, onDirty, onChange, onCursor }: Props) {
       const d = p ? getDoc(p) : undefined;
       if (!p || !d) return;
       cb.current.onDirty(p, isDirty(d));
-      cb.current.onChange(p, d.language, d.model.getVersionId(), d.model.getValue());
+      cb.current.onChange(p, d.language, () => ({ version: d.model.getVersionId(), text: d.model.getValue() }));
     });
     ed.onDidChangeCursorPosition((e) => cb.current.onCursor(e.position.lineNumber, e.position.column));
     return () => ed.dispose();

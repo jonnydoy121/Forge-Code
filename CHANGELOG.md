@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Phase 9 - Polish
+- First-run welcome: privacy choice (local-only vs hosted) and edit-review preference come first; keyboard-operable; reachable again from the palette.
+- Accessibility: axe-core audit (no serious or critical violations in editor, agent panel, settings, Context, Plan and palette views) with fixes to the file tree (tree/treeitem/group), tabs (no nested controls), tab lists and the palette listbox; keyboard-only flows tested.
+- Performance: LSP document sync is debounced and lazy (typing in a 5,000-line file went from about 52 ms to about 3 ms per key); opening that file takes about 60 ms.
+- Packaging: Windows NSIS installer built (`Forge_0.0.0_x64-setup.exe`, 6.6 MB) and the release exe launches; a `package` workflow builds bundles on Windows, macOS and Linux (not yet run).
 ### Phase 8 - Safety and extensibility
 - Safety: persisted audit log and network log (secrets redacted), local-only mode via a guarded fetch (policy refusals are never retried), prompt-injection detection with quarantine banners, credential-path guard, outbound secret redaction, wall-clock limit, permission gate with deny list.
 - Sandbox: Rust AppContainer on Windows (workspace-only writes, no network incl. loopback, no profile or credential access, kill-on-close job) with scrubbed env; env-only fallback elsewhere. Verified with positive-control tests. Background processes (no network sandbox, always gated).

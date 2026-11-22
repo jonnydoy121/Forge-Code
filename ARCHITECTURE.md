@@ -70,4 +70,4 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 - The "agent" rule activation is implemented as an index of descriptions plus a `get_rule` tool.
 
 ## Status
-Phases 0-8 complete (Phase 9 not started). See CHANGELOG.md.
+Phases 0-9 built. Not verified: CI and packaging on macOS/Linux, real external agents, screen-reader testing by a human. See CHANGELOG.md.

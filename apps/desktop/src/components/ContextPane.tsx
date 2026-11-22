@@ -17,13 +17,15 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
   const [tab, setTab] = useState<Tab>("rules");
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="context-pane" aria-label="Context">
-      <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-sm" role="tablist">
+      <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-sm">
         <strong>Context</strong>
-        {(["rules", "memory", "docs", "connections"] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} data-testid={`ctx-tab-${t}`} className={tab === t ? "underline" : "text-[var(--muted)]"} onClick={() => setTab(t)}>
-            {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "docs" ? "Docs" : "Connections"}
-          </button>
-        ))}
+        <div className="flex gap-3" role="tablist" aria-label="Context sections">
+          {(["rules", "memory", "docs", "connections"] as Tab[]).map((t) => (
+            <button key={t} role="tab" aria-selected={tab === t} data-testid={`ctx-tab-${t}`} className={tab === t ? "underline" : "text-[var(--muted)]"} onClick={() => setTab(t)}>
+              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "docs" ? "Docs" : "Connections"}
+            </button>
+          ))}
+        </div>
         <button className="ml-auto underline" onClick={onClose}>Close</button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-4 text-sm">

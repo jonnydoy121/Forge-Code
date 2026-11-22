@@ -39,6 +39,7 @@ test("editor core flow in the real app", async () => {
   const term = page.getByTestId("terminal");
   await expect(term).toBeVisible();
   await term.click();
+  await expect(term).toContainText("PS ", { timeout: 20_000 }); // wait for the shell prompt before typing
   await page.keyboard.type("echo forge-$((6*7))\r".replace("$((6*7))", "42"));
   await expect(term).toContainText("forge-42", { timeout: 20_000 });
 });
