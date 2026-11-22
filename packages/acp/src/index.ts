@@ -2,7 +2,7 @@
 // ...) as a subprocess and speaks JSON-RPC over stdio. The agent reads and writes files THROUGH Forge, so its edits
 // land in the same pending-changes model and review UI as the built-in agent's.
 
-import { isIgnoredDir, isSecretPath, resolveInRoot } from "@forge/protocol";
+import { inIgnoredDirBelow, isSecretPath, resolveInRoot } from "@forge/protocol";
 import { JsonRpcPeer, RpcFailure, type LineTransport } from "@forge/rpc";
 
 export const ACP_PROTOCOL_VERSION = 1;
@@ -179,7 +179,7 @@ export function forgeAcpHandlers(d: ForgeAcpDeps): AcpHandlers {
   const confine = (raw: string, forWrite: boolean) => {
     const path = resolveInRoot(d.root, raw); // throws if it escapes the workspace
     if (isSecretPath(path)) throw new Error("refusing: this file looks like it holds secrets");
-    if (forWrite && path.split("/").some((c) => isIgnoredDir(c))) throw new Error("refusing: writes to ignored or generated directories are not allowed");
+    if (forWrite && inIgnoredDirBelow(d.root, path)) throw new Error("refusing: writes to ignored or generated directories are not allowed");
     return path;
   };
   return {

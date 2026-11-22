@@ -1,4 +1,4 @@
-import { isIgnoredDir, isSecretPath, resolveInRoot, type TouchedFile } from "@forge/protocol";
+import { inIgnoredDirBelow, isSecretPath, resolveInRoot, type TouchedFile } from "@forge/protocol";
 import type { RegisteredTool } from "./index";
 
 export interface EditOutcome {
@@ -31,7 +31,7 @@ function target(root: string, raw: unknown): string {
   if (!rel) throw new Error("missing required argument: path");
   const path = resolveInRoot(root, rel);
   if (isSecretPath(path)) throw new Error("refusing to modify a file that looks like it holds secrets");
-  if (path.split("/").some((c) => isIgnoredDir(c))) throw new Error("refusing to modify files in ignored or generated directories");
+  if (inIgnoredDirBelow(root, path)) throw new Error("refusing to modify files in ignored or generated directories");
   return path;
 }
 

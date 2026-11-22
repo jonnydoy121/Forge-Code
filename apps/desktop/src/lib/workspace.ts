@@ -75,7 +75,7 @@ export const tauriBg: BackgroundRunner = {
 };
 
 /** MCP servers and ACP agents are line-oriented subprocesses: bridge them through the Rust process manager. */
-export async function launchLineProcess(command: string, args: string[], cwd: string, env: Record<string, string>): Promise<LineTransport & { id: number }> {
+export async function launchLineProcess(command: string, args: string[], cwd: string | undefined, env: Record<string, string>): Promise<LineTransport & { id: number }> {
   let onLine: (l: string) => void = () => {};
   let onClose: () => void = () => {};
   const unlisten: (() => void)[] = [];
@@ -167,6 +167,9 @@ function sessionIdFor(root: string): string {
 
 export async function createWorkspaceServices(opts: {
   root: string;
+  /** Where runtime state (pending changes, checkpoints, audit, sessions, docs, permissions) lives. Defaults to <root>/.forge.
+   *  Isolated threads keep it outside their worktree so none of it is ever committed to the thread's branch. */
+  stateDir?: string;
   mode: () => ReviewMode;
   planFiles?: () => string[] | null;
   onChange: () => void;
@@ -187,7 +190,8 @@ export async function createWorkspaceServices(opts: {
 }): Promise<WorkspaceServices> {
   const root = norm(opts.root).replace(/\/+$/, "");
   const sessionId = sessionIdFor(root);
-  const checkpoints = new FileCheckpointStore({ fs: diskFs, dir: `${root}/.forge/checkpoints/${sessionId}` });
+  const stateDir = norm(opts.stateDir ?? `${root}/.forge`).replace(/\/+$/, "");
+  const checkpoints = new FileCheckpointStore({ fs: diskFs, dir: `${stateDir}/checkpoints/${sessionId}` });
   const rel = (p: string) => (p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
   let runtime: AgentRuntime | null = null;
   let activeRuns = 0;
@@ -225,7 +229,7 @@ export async function createWorkspaceServices(opts: {
 
   const auditRef: { current: AuditLog | null } = { current: null };
   // Pending changes survive restarts: saved (debounced) to .forge/pending and restored below.
-  const pendingFile = `${root}/.forge/pending/${sessionId}.json`;
+  const pendingFile = `${stateDir}/pending/${sessionId}.json`;
   let restored = false;
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
   const schedulePersist = () => {
@@ -268,8 +272,8 @@ export async function createWorkspaceServices(opts: {
   const home = await invoke<string | null>("home_dir").catch(() => null);
   const rules = new RuleEngine(diskFs, root, () => loadSettings().userRules);
   const memories = new MemoryStore(diskFs, { project: `${root}/.forge/memory`, user: home ? `${norm(home)}/.forge/memory` : undefined }, opts.onChange);
-  const docs = new DocsStore(diskFs, `${root}/.forge/docs`, (u) => fetchTextLate(u), opts.onChange);
-  const sessions = new SessionStore(diskFs, `${root}/.forge/sessions`);
+  const docs = new DocsStore(diskFs, `${stateDir}/docs`, (u) => fetchTextLate(u), opts.onChange);
+  const sessions = new SessionStore(diskFs, `${stateDir}/sessions`);
   const uniqueFiles = async (pattern: string, glob?: string) => new Set((await indexBackend.grep(pattern, glob, 5000).catch(() => [])).map((h) => h.file)).size;
   const facts = async () =>
     collectFacts(diskFs, root, {
@@ -281,7 +285,7 @@ export async function createWorkspaceServices(opts: {
   const plans = new PlanStore(diskFs, root, opts.onChange);
   const planGuard = new PlanGuard({ store: plans, askAddFile: opts.askAddFile, onBlocked: opts.onBlocked }, root);
 
-  const audit = new AuditLog(diskFs, `${root}/.forge/audit/${sessionId}.jsonl`);
+  const audit = new AuditLog(diskFs, `${stateDir}/audit/${sessionId}.jsonl`);
   void audit.load();
   const guarded = guardFetch(
     async (url, init) => (await pickFetch())(url, init),
@@ -320,13 +324,13 @@ export async function createWorkspaceServices(opts: {
     audit: (e) => audit.record({ kind: "permission", name: e.tool, detail: `${e.decision}${e.danger ? " (dangerous: " + e.danger + ")" : ""}: ${e.summary}`, blocked: e.decision === "deny" }),
     load: async () => {
       try {
-        const t = await diskFs.read(`${root}/.forge/permissions.json`);
+        const t = await diskFs.read(`${stateDir}/permissions.json`);
         return t ? (JSON.parse(t) as { allow: { tool: string; pattern: string }[] }) : { allow: [] };
       } catch {
         return { allow: [] };
       }
     },
-    save: (f) => diskFs.write(`${root}/.forge/permissions.json`, JSON.stringify(f, null, 2)),
+    save: (f) => diskFs.write(`${stateDir}/permissions.json`, JSON.stringify(f, null, 2)),
   });
 
   const verifyDeps: VerifyDeps = {

@@ -75,9 +75,11 @@ interface Props {
   /** only the visible thread receives review-comment sends */
   active?: boolean;
   onBusyChange?: (busy: boolean) => void;
+  /** this thread works in its own git worktree (no shared code index) */
+  isolated?: boolean;
 }
 
-export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook, activePlanSlug, onStartBuild, threadId = "main", active = true, onBusyChange }: Props) {
+export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook, activePlanSlug, onStartBuild, threadId = "main", active = true, onBusyChange, isolated = false }: Props) {
   const [settings, setSettings] = useState<AgentSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState(false);
   const [mode, setMode] = useState<Mode>("ask");
@@ -206,6 +208,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     try {
       if (!runtime.current) {
         runtime.current = await createSession({
+          isolated,
           root,
           settings,
           services,
@@ -262,7 +265,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               }
             }
             try {
-              const map = await indexBackend.repoMap(focus, 1500);
+              const map = isolated ? null : await indexBackend.repoMap(focus, 1500); // the index describes the main checkout
               if (map) out.push({ id: "repo-map", label: "Repo map (ranked by relevance to your open files)", priority: 3, text: map });
             } catch {
               /* index not ready yet: the agent can still use grep/read tools */

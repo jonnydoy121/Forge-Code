@@ -27,12 +27,12 @@ function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
 }
 
 /** The agent loop's transport: its own OS process when the bundled runtime is available, otherwise a Web Worker. */
-async function openPort(root: string, preferProcess: boolean) {
+async function openPort(cwd: string | undefined, preferProcess: boolean) {
   if (preferProcess) {
     try {
       const exe = await invoke<string | null>("runtime_sidecar_path");
       if (exe) {
-        const t = await launchLineProcess(exe, [], root, {});
+        const t = await launchLineProcess(exe, [], cwd, {});
         return { port: linePort((l) => t.send(l), (on) => t.onLine(on), () => t.close()), kind: "process" as const };
       }
     } catch {
@@ -48,13 +48,15 @@ export async function createSession(opts: {
   services: WorkspaceServices;
   sections: () => Promise<ContextSection[]>;
   onHook?: (event: string, output: string) => void;
+  /** an isolated thread in its own worktree: the workspace-wide code index points at the main checkout, so do not use it */
+  isolated?: boolean;
 }) {
   const { settings, services } = opts;
   const gateway = makeGateway(services, settings);
   const audit = (kind: "model" | "tool", prefix = "") => (e: { kind: "model" | "tool"; name: string; detail?: string }) =>
     services.audit.record({ kind: e.kind === "model" ? "model" : kind, name: `${prefix}${e.name}`, detail: e.detail });
 
-  const readTools = [...READ_TOOLS, ...createIndexTools(indexBackend), ...services.contextTools.filter((t) => t.spec.class === "read" && t.spec.name !== "remember")];
+  const readTools = [...READ_TOOLS, ...(opts.isolated ? [] : createIndexTools(indexBackend)), ...services.contextTools.filter((t) => t.spec.class === "read" && t.spec.name !== "remember")];
   // Sub-agents: fresh context, read-only tools, no `delegate` (no recursion). Only their report comes back.
   const makeSub = () =>
     new Runtime({
@@ -84,7 +86,7 @@ export async function createSession(opts: {
   const auditEntry = audit("tool");
   // The agent loop runs outside the UI thread (its own OS process, or a Web Worker as the fallback). Everything that
   // needs Tauri IPC (files, HTTP, permissions, indexing) stays here and is served to it over messages.
-  const transport = typeof Worker !== "undefined" ? await openPort(services.root, settings.runtimeProcess) : null;
+  const transport = typeof Worker !== "undefined" ? await openPort(opts.isolated ? undefined : services.root, settings.runtimeProcess) /* an isolated thread must not hold its worktree as a process cwd: Windows cannot delete a directory that is in use */ : null;
   const runtime: AgentRuntime =
     transport
       ? new RuntimeClient(

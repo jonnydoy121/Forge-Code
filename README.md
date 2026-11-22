@@ -12,6 +12,7 @@ review, everything is reversible, and your code stays on your machine unless you
   permission gate with a deny list, audit log.
 - **Verified work.** The agent runs your tests, linter and type-checker, reads structured failures, and fixes them. A guard
   flags weakened tests.
+- **Parallel, isolated agents.** Several agent threads at once; an isolated thread gets its own git worktree and branch, and you merge or discard it.
 - **Optional inline completions.** Ghost text as you type, off by default and clear about what it sends.
 - **Any model, any agent.** Anthropic, OpenAI-compatible and local (Ollama) models; MCP servers; ACP agents.
 - **Fast on big repos.** Tree-sitter index, repo map and semantic search; a 120,000-file repo indexes in about 6 s.

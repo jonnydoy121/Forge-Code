@@ -26,6 +26,18 @@ export const relativeTo = (root: string, abs: string) => norm(abs).slice(norm(ro
 const IGNORED_DIRS = new Set([".git", "node_modules", "target", "dist", "build", ".next", ".venv", "__pycache__", ".forge"]);
 export const isIgnoredDir = (name: string) => IGNORED_DIRS.has(name);
 
+/**
+ * Is `path` inside an ignored or generated directory *beneath* `root`? Only the part below the workspace root counts:
+ * the folders above it (a checkout under `.forge/worktrees/`, a project that lives in `build/`) are the user's own
+ * business, and checking them would make such a workspace impossible to edit.
+ */
+export function inIgnoredDirBelow(root: string, path: string): boolean {
+  const r = norm(root).replace(/\/+$/, "");
+  const p = norm(path);
+  const rel = p.startsWith(r + "/") ? p.slice(r.length + 1) : p;
+  return rel.split("/").some((c) => isIgnoredDir(c));
+}
+
 const SECRET_NAMES = [/^\.env(\..*)?$/i, /\.pem$/i, /\.key$/i, /\.p12$/i, /^id_(rsa|dsa|ecdsa|ed25519)/i, /^credentials/i, /^\.npmrc$/i, /^\.netrc$/i];
 /** Files whose contents must never be indexed or sent to a model. */
 export function isSecretPath(path: string): boolean {

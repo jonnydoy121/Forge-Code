@@ -16,7 +16,9 @@ import { PlanExecutor, type Question } from "@forge/plans";
 import type { RunOutcome } from "./components/AgentPanel";
 import type { AskRequest, Remember } from "@forge/safety";
 import type { Mode } from "@forge/protocol";
-import { createWorkspaceServices, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
+import type { ReviewMode } from "@forge/review";
+import { createThreadWorktree, mergeThread, removeThread, threadSummary } from "./lib/worktree";
+import { createWorkspaceServices, diskFs, git, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
 import { loadSettings } from "./lib/settings";
 import { loadApiKey } from "./lib/secrets";
 import { completeOnce, completeShort } from "./lib/agentSession";
@@ -63,7 +65,10 @@ export function App() {
   // Parallel threads can ask at the same time: prompts queue and are answered one at a time, never dropped.
   const [permissions, setPermissions] = useState<{ req: AskRequest; resolve: (a: Remember) => void }[]>([]);
   const permission = permissions[0] ?? null;
-  const [threads, setThreads] = useState([{ id: "main", name: "Thread 1" }]);
+  type Thread = { id: string; name: string; worktree?: { path: string; branch: string; services: WorkspaceServices } };
+  const [threads, setThreads] = useState<Thread[]>([{ id: "main", name: "Thread 1" }]);
+  const [threadMsg, setThreadMsg] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
   const [activeThread, setActiveThread] = useState("main");
   const [busyThreads, setBusyThreads] = useState<Record<string, boolean>>({});
   const nextThread = useRef(2);
@@ -97,21 +102,65 @@ export function App() {
     if (import.meta.env.DEV) (window as unknown as { __forge?: unknown }).__forge = { openFolder: (d: string) => openFolder(d), services };
   });
 
-  async function openFolder(dir: string) {
-    setThreads([{ id: "main", name: "Thread 1" }]);
-    setActiveThread("main");
-    nextThread.current = 2;
-    for (const t of tabs.tabs) disposeDoc(t.path);
-    dispatch({ type: "reset" });
-    setCounts({});
-    setServers({});
-    await lsp.current.setRoot(dir);
-    setRoot(dir);
-    setView("editor");
-    rootRef.current = dir;
-    const svc = await createWorkspaceServices({
+  /** Start a thread in its own git worktree on its own branch, so it cannot collide with other threads or the main checkout. */
+  async function newIsolatedThread() {
+    if (!root || !services) return;
+    const id = `t${nextThread.current}`;
+    const name = `Thread ${nextThread.current}`;
+    setThreadMsg("Creating an isolated worktree…");
+    let created = false;
+    try {
+      const wt = await createThreadWorktree({ git, fs: diskFs, root, id });
+      created = true;
+      // The thread's runtime state lives outside its worktree, so none of it is ever committed to the thread's branch.
+      const svc = await makeServices(wt.path, { stateDir: `${root}/.forge/threads/${id}`, mode: () => "auto" });
+      nextThread.current++;
+      setThreads((ts) => [...ts, { id, name, worktree: { ...wt, services: svc } }]);
+      setActiveThread(id);
+      setThreadMsg(`${name} works on branch ${wt.branch} in its own checkout. Its edits are applied there, not in your files; merge or discard it when it is done.`);
+    } catch (e) {
+      if (created) await removeThread(git, root, id).catch(() => {});
+      setThreadMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function dropThread(id: string) {
+    setThreads((ts) => ts.filter((t) => t.id !== id));
+    setActiveThread((a) => (a === id ? "main" : a));
+    setConfirmDiscard(null);
+  }
+
+  async function mergeIsolated(t: Thread) {
+    if (!root || !t.worktree) return;
+    setThreadMsg(`Merging ${t.name}…`);
+    const r = await mergeThread({ git, root, id: t.id, name: t.name });
+    setThreadMsg(r.message);
+    if (r.ok) {
+      dropThread(t.id);
+      await refreshFromDisk();
+    }
+  }
+
+  async function discardIsolated(t: Thread) {
+    if (!root || !t.worktree) return;
+    const problem = await removeThread(git, root, t.id);
+    if (problem) return setThreadMsg(`Could not discard ${t.name}: ${problem}. The thread is still open.`);
+    dropThread(t.id);
+    setThreadMsg(`Discarded ${t.name}; its branch and checkout were removed.`);
+  }
+
+  async function showThreadChanges(t: Thread) {
+    if (!root || !t.worktree) return;
+    const stat = await threadSummary(git, root, t.id, t.worktree.path).catch(() => "");
+    setThreadMsg(stat ? `${t.name} changed:\n${stat}` : `${t.name} has no changes yet.`);
+  }
+
+  /** Workspace services for the main checkout, or (with extra) for an isolated thread rooted at its worktree. */
+  function makeServices(dir: string, extra?: { stateDir?: string; mode?: () => ReviewMode }) {
+    return createWorkspaceServices({
       root: dir,
-      mode: () => loadSettings().reviewMode,
+      stateDir: extra?.stateDir,
+      mode: extra?.mode ?? (() => loadSettings().reviewMode),
       onChange: () => setVersion((v) => v + 1),
       onReport: (e) => setReport(e),
       onHook: (event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`),
@@ -126,7 +175,24 @@ export function App() {
       onBlocked: (path, message) => setNotice(message),
       onMemoryCreated: (name, body) => setNotice(`The agent saved a memory: ${name} - ${body.slice(0, 160)}. Review it under Context > Memories.`),
     });
+  }
+
+  async function openFolder(dir: string) {
+    setThreads([{ id: "main", name: "Thread 1" }]);
+    setActiveThread("main");
+    setThreadMsg(null);
+    nextThread.current = 2;
+    for (const t of tabs.tabs) disposeDoc(t.path);
+    dispatch({ type: "reset" });
+    setCounts({});
+    setServers({});
+    await lsp.current.setRoot(dir);
+    setRoot(dir);
+    setView("editor");
+    rootRef.current = dir;
+    const svc = await makeServices(dir);
     setServices(svc);
+    void diskFs.list(`${dir}/.forge/worktrees`).then((names) => names.length > 0 && setThreadMsg(`Unmerged thread checkouts from an earlier session: ${names.join(", ")} (branches forge/<name>). Merge or remove them with git; they are not reopened as threads.`)).catch(() => {});
     if (svc.hookErrors.length) setNotice(`.forge/hooks.json: ${svc.hookErrors.join("; ")}`);
     void svc.proposeCommandsSection().catch(() => {});
     void svc.plans.list().then((l) => setActivePlan(l[0]?.slug ?? null));
@@ -433,6 +499,7 @@ export function App() {
                     onClick={() => setActiveThread(t.id)}
                   >
                     {t.name}
+                    {t.worktree ? <span title={`branch ${t.worktree.branch}`}> ⎇</span> : null}
                     {busyThreads[t.id] ? <span aria-label="running" title="running"> ●</span> : null}
                   </button>
                 ))}
@@ -450,7 +517,39 @@ export function App() {
               >
                 +
               </button>
-              {activeThread !== "main" && !busyThreads[activeThread] && (
+              <button
+                aria-label="New isolated thread"
+                title="Start a thread in its own git worktree and branch, so it cannot collide with other threads"
+                data-testid="thread-new-isolated"
+                className="rounded px-2 py-0.5 text-[var(--muted)] hover:bg-[var(--hover)]"
+                onClick={() => void newIsolatedThread()}
+              >
+                + isolated
+              </button>
+              {threads.find((t) => t.id === activeThread)?.worktree && (
+                <span className="ml-auto flex items-center gap-1">
+                  <button className="rounded px-2 py-0.5 text-[var(--muted)] hover:bg-[var(--hover)]" data-testid="thread-changes" onClick={() => void showThreadChanges(threads.find((t) => t.id === activeThread)!)}>
+                    Changes
+                  </button>
+                  <button
+                    className="rounded bg-green-800/60 px-2 py-0.5 disabled:opacity-40"
+                    data-testid="thread-merge"
+                    disabled={!!busyThreads[activeThread]}
+                    onClick={() => void mergeIsolated(threads.find((t) => t.id === activeThread)!)}
+                  >
+                    Merge into main
+                  </button>
+                  <button
+                    className="rounded px-2 py-0.5 text-red-300 disabled:opacity-40"
+                    data-testid="thread-discard"
+                    disabled={!!busyThreads[activeThread]}
+                    onClick={() => (confirmDiscard === activeThread ? void discardIsolated(threads.find((t) => t.id === activeThread)!) : setConfirmDiscard(activeThread))}
+                  >
+                    {confirmDiscard === activeThread ? "Click again to discard" : "Discard"}
+                  </button>
+                </span>
+              )}
+              {activeThread !== "main" && !threads.find((t) => t.id === activeThread)?.worktree && !busyThreads[activeThread] && (
                 <button
                   className="ml-auto rounded px-2 py-0.5 text-[var(--muted)] hover:bg-[var(--hover)]"
                   data-testid={`thread-close-${activeThread}`}
@@ -464,16 +563,22 @@ export function App() {
                 </button>
               )}
             </div>
+            {threadMsg && (
+              <div className="whitespace-pre-wrap border-b border-[var(--border)] bg-[var(--panel)] px-2 py-1 text-xs text-[var(--muted)]" data-testid="thread-message" role="status">
+                {threadMsg}
+              </div>
+            )}
             {threads.map((t) => (
               <div key={t.id} className={t.id === activeThread ? "flex min-h-0 flex-1 flex-col [&>aside]:min-h-0 [&>aside]:flex-1" : "hidden"}>
                 <AgentPanel
                   threadId={t.id}
                   active={t.id === activeThread}
                   onBusyChange={(b) => threadBusy(t.id, b)}
-                  root={root}
-                  activePath={tabs.active}
-                  services={services}
-                  pendingCount={pendingFiles.length}
+                  isolated={!!t.worktree}
+                  root={t.worktree?.path ?? root}
+                  activePath={t.worktree ? null : tabs.active}
+                  services={t.worktree?.services ?? services}
+                  pendingCount={t.worktree ? 0 : pendingFiles.length}
                   version={version}
                   onOpenReview={() => setView("review")}
                   onFilesChanged={() => void refreshFromDisk()}
