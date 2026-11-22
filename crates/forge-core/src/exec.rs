@@ -46,7 +46,12 @@ fn kill_tree(pid: u32) {
 }
 #[cfg(not(windows))]
 fn kill_tree(pid: u32) {
-    let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    // Children are started in their own process group (pgid == pid), so a negative pid kills the whole tree: killing
+    // only the shell would leave its children running and holding the output pipes open.
+    let group = Command::new("kill").args(["-9", "--", &format!("-{pid}")]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    if !group.map(|s| s.success()).unwrap_or(false) {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
 }
 
 pub fn run_shell(command: &str, cwd: &Path, timeout: Duration, env: &[(String, String)], max_output: usize) -> Result<ExecResult, String> {
@@ -86,6 +91,11 @@ fn run_inner(command: &str, cwd: &Path, timeout: Duration, env: &[(String, Strin
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0); // own process group, so a timeout or stop can kill the whole tree
     }
     let started = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("failed to start command: {e}"))?;

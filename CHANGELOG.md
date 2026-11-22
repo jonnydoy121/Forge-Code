@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### First CI run (Windows and macOS green, Ubuntu found a real bug)
+- On Linux a command that exceeded its timeout was not actually stopped: only the shell was killed, its child kept the output pipes open (the timeout test took 30 s). Commands, background processes and MCP/ACP processes now start in their own process group on Unix and the whole group is killed (`exec.rs`, `bg.rs`, `proc.rs`).
+- The keyring test skips on headless Linux (no Secret Service); CI annotates cargo failures so they can be read without log access.
+
 ### Forge-Code branding, research and inline edit
 - Product name is now **Forge-Code** (window title, installer name, welcome screen, UI text, README). Technical identifiers are unchanged on purpose (`dev.forge.editor`, crate and binary names) so credential-store entries and installed data keep working.
 - Added `docs/RESEARCH.md`: competitor landscape (Cursor, Windsurf/Devin Desktop, Zed, Kiro, Cline, Aider, Continue) from vendor docs, a gap analysis and a ranked roadmap. Evidence is vendor-side only; independent reviews were not available.

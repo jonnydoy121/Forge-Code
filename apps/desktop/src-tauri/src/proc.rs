@@ -57,7 +57,12 @@ fn kill_tree(pid: u32) {
 }
 #[cfg(not(windows))]
 fn kill_tree(pid: u32) {
-    let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    // Children are started in their own process group (pgid == pid), so a negative pid kills the whole tree: killing
+    // only the shell would leave its children running and holding the output pipes open.
+    let group = Command::new("kill").args(["-9", "--", &format!("-{pid}")]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    if !group.map(|s| s.success()).unwrap_or(false) {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
 }
 
 #[tauri::command]
@@ -67,6 +72,11 @@ pub fn proc_start(app: AppHandle, state: State<ProcState>, command: String, args
         cmd.current_dir(Path::new(&dir));
     }
     cmd.envs(env).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0); // own process group, so a timeout or stop can kill the whole tree
+    }
     let mut child = cmd.spawn().map_err(|e| format!("could not start {command}: {e}"))?;
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;

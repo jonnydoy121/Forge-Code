@@ -55,7 +55,12 @@ fn kill_tree(pid: u32) {
 }
 #[cfg(not(windows))]
 fn kill_tree(pid: u32) {
-    let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    // Children are started in their own process group (pgid == pid), so a negative pid kills the whole tree: killing
+    // only the shell would leave its children running and holding the output pipes open.
+    let group = Command::new("kill").args(["-9", "--", &format!("-{pid}")]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    if !group.map(|s| s.success()).unwrap_or(false) {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
 }
 
 impl Background {
@@ -82,6 +87,11 @@ impl Background {
         {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0); // own process group, so a timeout or stop can kill the whole tree
         }
         let mut child = cmd.spawn().map_err(|e| format!("failed to start: {e}"))?;
         let lines = Arc::new(Mutex::new(VecDeque::new()));
