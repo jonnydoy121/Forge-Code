@@ -77,6 +77,7 @@ export async function createSession(opts: {
       ...services.verifyTools,
       ...services.planTools,
       ...services.commandTools({ sandbox: settings.sandbox, toolchainRead: settings.toolchainRead }),
+      ...services.skillTools({ sandbox: settings.sandbox, toolchainRead: settings.toolchainRead }),
       ...services.mcp.tools(),
       ...services.contextTools.filter((t) => t.spec.name === "remember"),
       createSubAgentTool({ make: makeSub, onCost: (usd) => runtime.addCost(usd) }),

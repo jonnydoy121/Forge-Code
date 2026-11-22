@@ -6,7 +6,7 @@ import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { createSession } from "../lib/agentSession";
 import { fsApi, indexBackend } from "../lib/ipc";
 import { attachmentKey, attachmentLabel, resolveAttachment, type Attachment } from "../lib/attachments";
-import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord, type SavedPrompt, expandPrompt, matchPrompts } from "@forge/context-store";
+import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord, type SavedPrompt, expandPrompt, matchPrompts, skillsIndex } from "@forge/context-store";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
@@ -263,6 +263,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               } catch {
                 /* vanished file, offline page, ...: skip */
               }
+            }
+            try {
+              const skills = await services.skills();
+              if (skills.length) out.push({ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) });
+            } catch {
+              /* no skills folder */
             }
             try {
               const map = isolated ? null : await indexBackend.repoMap(focus, 1500); // the index describes the main checkout

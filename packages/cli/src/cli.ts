@@ -10,7 +10,7 @@ import { InMemoryCheckpointStore } from "@forge/checkpoints";
 import type { ModelGateway } from "@forge/protocol";
 import { diskFs, promptFs, toolFs } from "./nodefs";
 import { headlessCommandTools } from "./commands";
-import { expandPrompt, loadPrompts } from "@forge/context-store";
+import { createSkillTools, expandPrompt, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
 import { unifiedDiff } from "./format";
 
 export interface Io {
@@ -155,8 +155,14 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       return { status: r.status, added: r.stats.added, removed: r.stats.removed, checkpoint: r.checkpoint, created: r.created, warnings: r.warnings };
     },
   };
-  const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : [])] : READ_TOOLS });
-  const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 } });
+  // Skills (.forge/skills): instructions only. The CLI has no OS sandbox, so bundled scripts are never offered here.
+  const skillFs = { read: promptFs.read, list: promptFs.list };
+  const skills = await loadSkills(skillFs, `${root}/.forge/skills`);
+  const skillTools = skills.length ? createSkillTools({ root, fs: skillFs, skills: () => loadSkills(skillFs, `${root}/.forge/skills`) }) : [];
+  const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...skillTools, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : [])] : [...READ_TOOLS, ...skillTools] });
+  const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 },
+    sections: skills.length ? () => [{ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) }] : undefined,
+  });
 
   let answer = "";
   let stop: string | null = null;

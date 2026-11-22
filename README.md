@@ -53,6 +53,9 @@ To let the agent run tests or linters, allow them explicitly: `run "fix the fail
 ## Saved prompts
 Put reusable prompts in `.forge/prompts/<name>.md` (optional `description:` front matter; `$ARGUMENTS` is replaced by what follows the command). In the app type `/` to pick one; on the command line run `forge-code run "/name args"`. Commit the folder to share workflows with your team.
 
+## Skills
+A skill is a folder `.forge/skills/<name>/` with a `SKILL.md` (optional `description:` front matter) and any scripts or reference files it needs. The agent sees the list, loads a skill when a task calls for it, and can run its bundled scripts (`.js .mjs .cjs .py .sh`); you are asked before every script runs, and it runs in the OS sandbox when that is on. Scripts are code from your repository: only open repositories you trust, as with any project that has build scripts. The command-line tool uses skills for instructions only.
+
 ## Layout
 `apps/desktop` (Tauri + React), `crates/forge-core` (Rust: filesystem, index, sandbox, secrets), `packages/*` (TypeScript:
 agent runtime, model gateway, tools, review, verification, safety, MCP, ACP). Rules for agents working in this repo are

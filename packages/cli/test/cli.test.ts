@@ -133,3 +133,34 @@ describe("saved prompts", () => {
     expect(JSON.stringify(gw.requests[0]!.messages)).toContain("/nosuch thing");
   });
 });
+
+describe("skills in the CLI", () => {
+  function withSkill() {
+    const dir = project();
+    mkdirSync(`${dir}/.forge/skills/release`, { recursive: true });
+    writeFileSync(`${dir}/.forge/skills/release/SKILL.md`, "---\ndescription: Cut a release\n---\n# Release\nRun the checks, then tag.\n");
+    writeFileSync(`${dir}/.forge/skills/release/bump.js`, "console.log('would bump')");
+    return dir;
+  }
+
+  it("puts the skills index in the model's context and lets it load a skill, but never offers scripts", async () => {
+    const dir = withSkill();
+    const gw = new ScriptedGateway([[call("1", "use_skill", { name: "release" }), done], [text("tagged"), done]]);
+    const t = io(dir, gw);
+    expect(await runCli(["ask", "cut a release"], t.i)).toBe(0);
+    const first = JSON.stringify(gw.requests[0]);
+    expect(first).toContain("release: Cut a release");
+    const offered = gw.requests[0]!.tools!.map((x) => x.name);
+    expect(offered).toContain("use_skill");
+    expect(offered).not.toContain("run_skill_script"); // the CLI has no sandbox: instructions only
+    const toolText = JSON.stringify(gw.requests[1]!.messages.filter((m) => m.role === "tool"));
+    expect(toolText).toContain("Run the checks, then tag.");
+    expect(toolText).not.toContain("run_skill_script"); // not even advertised in the skill's own listing
+  });
+
+  it("offers nothing skill-related when the repo has no skills", async () => {
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    await runCli(["ask", "x"], io(project(), gw).i);
+    expect(gw.requests[0]!.tools!.map((x) => x.name)).not.toContain("use_skill");
+  });
+});

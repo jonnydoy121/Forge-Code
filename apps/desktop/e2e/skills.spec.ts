@@ -1,0 +1,114 @@
+// Skills in the real app: the index reaches the model, loading a skill is silent, running its script asks first and
+// goes through the real exec (sandboxed when sandboxing is on), and declining stops it.
+import { expect, test } from "@playwright/test";
+import { createServer, type IncomingMessage } from "node:http";
+import type { AddressInfo } from "node:net";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openWorkspace } from "./helpers";
+
+test.skip(!process.env.FORGE_CDP, "needs a running Forge window (FORGE_CDP)");
+
+const sse = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
+
+function skillWorkspace() {
+  const dir = mkdtempSync(join(tmpdir(), "forge-e2e-skill-")).replace(/[\\]/g, "/");
+  const sk = `${dir}/.forge/skills/greet`;
+  mkdirSync(sk, { recursive: true });
+  writeFileSync(`${sk}/SKILL.md`, "---\ndescription: Write a greeting file\n---\n# Greet\nRun greet.js with a name.\n");
+  writeFileSync(`${sk}/greet.js`, "const fs = require('fs');\nconst args = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));\nfs.writeFileSync('greeting.txt', 'Hello, ' + args.name + '!');\nconsole.log('wrote greeting for ' + args.name);\n");
+  writeFileSync(`${dir}/a.js`, "export const a = 1;\n");
+  return dir;
+}
+
+async function modelServer() {
+  const bodies: string[] = [];
+  const srv = createServer(async (req: IncomingMessage, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    bodies.push(body);
+    const toolMessages = (body.match(/"role":"tool"/g) ?? []).length;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const tool = (name: string, args: unknown) => ({ tool_calls: [{ index: 0, id: `c${toolMessages}`, function: { name, arguments: JSON.stringify(args) } }] });
+    const delta = toolMessages === 0 ? tool("use_skill", { name: "greet" }) : toolMessages === 1 ? tool("run_skill_script", { skill: "greet", script: "greet.js", args: { name: "World" } }) : { content: "all done" };
+    res.write(sse({ choices: [{ delta }] }));
+    res.write(sse({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }));
+    res.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  return { srv, bodies, port: (srv.address() as AddressInfo).port };
+}
+
+/** Point the app at the mock model, optionally turn the OS sandbox off, and ask the agent to greet. */
+async function start(page: import("@playwright/test").Page, port: number, opts: { sandbox: boolean }) {
+  await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("base-url").fill(`http://127.0.0.1:${port}/v1`);
+  if (!opts.sandbox) await page.getByTestId("sandbox-on").uncheck();
+  await page.getByTestId("settings-toggle").click();
+  await page.locator('[data-testid="mode-select"]:visible').selectOption("agent");
+  await page.locator('[data-testid="agent-input"]:visible').fill("greet the world");
+  await page.locator('[data-testid="agent-input"]:visible').press("Enter");
+}
+
+const toolOutput = async (page: import("@playwright/test").Page) => {
+  for (const el of await page.locator('[data-testid="tool-call"]:visible').all()) await el.click().catch(() => {});
+  return page.locator('[data-testid="messages"]:visible').innerText();
+};
+
+test("an approved skill script runs in the workspace with the model's arguments", async () => {
+  const dir = skillWorkspace();
+  const { srv, bodies, port } = await modelServer();
+  try {
+    const page = await openWorkspace(dir);
+    await start(page, port, { sandbox: false }); // Node lives under Program Files, which an unelevated sandbox cannot grant
+
+    // Loading the skill is a read: the first (and only) prompt is for the script.
+    await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-testid="permission-prompt"] pre')).toContainText("run_skill_script");
+    await page.getByTestId("allow-once").click();
+
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+    expect(readFileSync(`${dir}/greeting.txt`, "utf8")).toBe("Hello, World!");
+    expect(existsSync(`${dir}/.forge/skill-runs`) ? readdirSync(`${dir}/.forge/skill-runs`) : []).toEqual([]); // temp args file removed
+
+    // The first request carried the skills index and the skill tools.
+    expect(bodies[0]).toContain("greet: Write a greeting file");
+    expect(bodies[0]).toContain("use_skill");
+    expect(bodies[0]).toContain("run_skill_script");
+  } finally {
+    srv.close();
+  }
+});
+
+test("with the sandbox on, the script is routed through it and the result says so", async () => {
+  const dir = skillWorkspace();
+  const { srv, port } = await modelServer();
+  try {
+    const page = await openWorkspace(dir);
+    await start(page, port, { sandbox: true });
+    await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("allow-once").click();
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+    // Whether Node can run inside the sandbox depends on the machine (granting access under Program Files needs elevation),
+    // but the model is always told which isolation was used, and why a tool may be missing.
+    expect(await toolOutput(page)).toContain("ran in the OS sandbox");
+  } finally {
+    srv.close();
+  }
+});
+
+test("declining the prompt means the script never runs", async () => {
+  const dir = skillWorkspace();
+  const { srv, port } = await modelServer();
+  try {
+    const page = await openWorkspace(dir);
+    await start(page, port, { sandbox: false });
+    await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("deny").click();
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+    expect(existsSync(`${dir}/greeting.txt`)).toBe(false);
+  } finally {
+    srv.close();
+  }
+});
