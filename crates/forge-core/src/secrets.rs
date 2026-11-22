@@ -33,6 +33,12 @@ mod tests {
     #[test]
     fn roundtrip_overwrite_and_delete() {
         let name = format!("test-{}", std::process::id());
+        // Headless Linux (CI, containers) has no Secret Service to talk to: nothing to verify there. Windows and macOS
+        // always have a credential store, so a failure on those is a real failure.
+        if cfg!(target_os = "linux") && get(&name).is_err() {
+            eprintln!("skipping: no Secret Service available on this machine");
+            return;
+        }
         assert_eq!(get(&name).unwrap(), None);
         set(&name, "first").unwrap();
         assert_eq!(get(&name).unwrap().as_deref(), Some("first"));
