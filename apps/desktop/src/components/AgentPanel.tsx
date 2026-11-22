@@ -3,7 +3,7 @@ import type { Mode } from "@forge/protocol";
 import { redactSecrets, isSecretPath } from "@forge/protocol";
 import type { Runtime, MeterEntry } from "@forge/agent-runtime";
 import { createSession, type AuditEntry } from "../lib/agentSession";
-import { fsApi } from "../lib/ipc";
+import { fsApi, indexBackend } from "../lib/ipc";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
@@ -35,6 +35,8 @@ export function AgentPanel({ root, activePath }: Props) {
   const abort = useRef<AbortController | null>(null);
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
+  const activeRef = useRef(activePath);
+  activeRef.current = activePath;
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,6 +73,15 @@ export function AgentPanel({ root, activePath }: Props) {
               } catch {
                 /* file vanished or binary: skip */
               }
+            }
+            try {
+              const slash = (p: string) => p.split("\\").join("/");
+              const rel = (p: string) => slash(p).replace(slash(root!) + "/", "");
+              const focus = [...chipsRef.current, ...(activeRef.current ? [activeRef.current] : [])].map(rel);
+              const map = await indexBackend.repoMap(focus, 1500);
+              if (map) out.push({ id: "repo-map", label: "Repo map (ranked by relevance to your open files)", priority: 3, text: map });
+            } catch {
+              /* index not ready yet: the agent can still use grep/read tools */
             }
             return out;
           },

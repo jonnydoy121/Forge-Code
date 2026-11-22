@@ -1,6 +1,7 @@
 //! Forge core services. Phase 1: filesystem helpers and LSP plumbing.
 
 pub mod fs;
+pub mod index;
 pub mod lsp;
 
 pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");

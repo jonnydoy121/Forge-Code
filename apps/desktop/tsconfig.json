@@ -28,6 +28,9 @@
     },
     {
       "path": "../../packages/tool-host"
+    },
+    {
+      "path": "../../packages/indexer"
     }
   ]
 }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod indexer;
 mod lsp;
 mod pty;
 
@@ -33,6 +34,7 @@ fn main() {
         .plugin(tauri_plugin_http::init())
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
+        .manage(indexer::IndexState::default())
         .invoke_handler(tauri::generate_handler![
             list_dir,
             read_file,
@@ -45,6 +47,14 @@ fn main() {
             lsp::lsp_start,
             lsp::lsp_send,
             lsp::lsp_stop,
+            indexer::index_start,
+            indexer::index_status,
+            indexer::index_grep,
+            indexer::index_symbol,
+            indexer::index_references,
+            indexer::index_repo_map,
+            indexer::index_semantic,
+            indexer::index_cone,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Forge");

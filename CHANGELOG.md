@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Phase 3 - Indexing
+- Rust indexer in forge-core: .gitignore/.forgeignore/secret-aware walk, Merkle tree change detection, tree-sitter symbols/imports/references/chunks for TS/JS, Python, Go, Rust, Java, C#, C, C++, SQLite persistence, local hashing embeddings cached by chunk hash, file graph with personalised PageRank repo map, debounced file watcher.
+- Retrieval tools for the agent: repo_map, semantic_search, grep, symbol, references, dependency_cone; repo map attached to context automatically.
+- Benchmark (69,634 files / 6.65M lines): first index 9.1 s in background, incremental reindex 37 ms, symbol 2.4 ms, repo_map 13 ms, semantic search 50 ms, full-repo grep 540-800 ms (about 80-120 ms per million lines).
 ### Phase 2 - Agent loop + Ask mode
 - Model gateway: Anthropic and OpenAI-compatible (OpenAI, Ollama) streaming adapters, SSE parser, retry with backoff on 429/5xx, cost tracking, audit hook that labels each request local or REMOTE.
 - Agent runtime: loop with tool dispatch, permission gate hook, step/cost/abort limits, secret redaction of tool output, prompt-injection-aware system prompt, priority-based context assembly with token meter.

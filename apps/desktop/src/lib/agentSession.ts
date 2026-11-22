@@ -1,7 +1,8 @@
 import { Gateway, type FetchLike } from "@forge/model-gateway";
 import { Runtime, type ContextSection } from "@forge/agent-runtime";
-import { createToolHost, type FsBackend } from "@forge/tool-host";
-import { fsApi } from "./ipc";
+import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
+import { createIndexTools } from "@forge/indexer";
+import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
 
 export const tauriFs: FsBackend = {
@@ -33,7 +34,7 @@ export async function createSession(opts: {
     onRequest: (i) => opts.audit({ at: Date.now(), kind: "model-request", name: `${i.provider}/${i.model}`, detail: `${i.url} ${i.local ? "(local)" : "(REMOTE)"}` }),
   });
   gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
-  const tools = createToolHost({ root: opts.root, fs: tauriFs });
+  const tools = createToolHost({ root: opts.root, fs: tauriFs, tools: [...READ_TOOLS, ...createIndexTools(indexBackend)] });
   return new Runtime({
     gateway,
     tools,

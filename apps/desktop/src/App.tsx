@@ -6,7 +6,7 @@ import { TabBar } from "./components/TabBar";
 import { Terminal } from "./components/Terminal";
 import { CommandPalette } from "./components/CommandPalette";
 import { AgentPanel } from "./components/AgentPanel";
-import { fsApi } from "./lib/ipc";
+import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
 import { applyDiagnostics, disposeDoc, getDoc, isDirty, openDoc, saveDoc } from "./lib/monaco";
 import { LspManager, serverKeyFor, type ServerKey, type ServerStatus } from "./lib/lspManager";
 import { initialTabs, tabsReducer } from "./lib/tabs";
@@ -25,6 +25,7 @@ export function App() {
   const [cursor, setCursor] = useState<[number, number]>([1, 1]);
   const [counts, setCounts] = useState<Record<string, [number, number]>>({});
   const [servers, setServers] = useState<Partial<Record<ServerKey, ServerStatus>>>({});
+  const [indexInfo, setIndexInfo] = useState<{ progress?: string; status?: IndexStatus }>({});
   const lsp = useRef(new LspManager());
 
   useEffect(() => {
@@ -33,7 +34,15 @@ export function App() {
       setCounts((prev) => ({ ...prev, [decodeURIComponent(uri).toLowerCase()]: c }));
     });
     lsp.current.onStatus((key, s) => setServers((prev) => ({ ...prev, [key]: s })));
+    const subs = [
+      indexApi.onProgress((p) => setIndexInfo((i) => ({ ...i, progress: p.phase === "done" ? undefined : `${p.phase} ${p.done}/${p.total || "?"}` }))),
+      indexApi.onBuilt(() => void indexApi.status().then((status) => setIndexInfo({ status }))),
+      indexApi.onUpdated(() => void indexApi.status().then((status) => setIndexInfo((i) => ({ ...i, status })))),
+    ];
     fsApi.initialWorkspace().then((w) => w && void openFolder(w)).catch(() => {});
+    return () => {
+      for (const s of subs) void s.then((unlisten) => unlisten());
+    };
   }, []);
 
   async function openFolder(dir: string) {
@@ -43,6 +52,8 @@ export function App() {
     setServers({});
     await lsp.current.setRoot(dir);
     setRoot(dir);
+    setIndexInfo({ progress: "starting" });
+    indexApi.start(dir).catch((e) => setNotice(`Indexer failed: ${e}`));
   }
 
   const chooseFolder = useCallback(async () => {
@@ -159,6 +170,9 @@ export function App() {
       </div>
       <footer className="flex gap-4 border-t border-[var(--border)] bg-[var(--panel)] px-3 py-0.5 text-xs text-[var(--muted)]" data-testid="status">
         <span>{root ?? "No folder open"}</span>
+        <span data-testid="index-status" title={indexInfo.status ? `${indexInfo.status.symbols} symbols, ${indexInfo.status.chunks} chunks` : ""}>
+          {indexInfo.progress ? `Indexing: ${indexInfo.progress}` : indexInfo.status ? `Indexed ${indexInfo.status.indexed_files} files` : ""}
+        </span>
         <span className="ml-auto">{activeDoc?.language ?? ""}</span>
         {server && (
           <span data-testid="lsp-status" title={server.detail}>

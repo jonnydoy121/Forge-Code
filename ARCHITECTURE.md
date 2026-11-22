@@ -42,5 +42,11 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 - LSP servers are npm devDependencies resolved from `<workspace>/node_modules/.bin`, then the repo's, then PATH. Missing servers show "LSP: unavailable" with the reason.
 - Monaco is pinned to 0.52.2 (import layout changed in later releases).
 
+## Indexer (Phase 3)
+- Lives in `crates/forge-core/src/index`; exposed to the UI through Tauri commands (`index_*`) and to the agent as tools (`packages/indexer`).
+- Per-file results (symbols, imports, refs, chunk hashes, embeddings) persist in `.forge/index/index.db` (SQLite). Derived maps live in memory and update incrementally.
+- Deviations from the spec, deliberate: embeddings are a local feature-hashing model (offline, deterministic, not neural; the `Embedder` trait is the seam for Ollama or hosted models); vectors are scanned brute-force instead of using sqlite-vec; graph edges are name-based (calls, inheritance and type uses all appear as identifier references) plus resolved imports; test-covers edges are derived from test-named files.
+- Process model: the TypeScript "workers" (runtime, gateway, tool host) run inside the webview today, calling Rust for fs, indexing, PTY and LSP. Moving them to separate processes remains open.
+
 ## Status
-Phase 1 complete. See CHANGELOG.md.
+Phases 0-3 complete. See CHANGELOG.md.

@@ -21,7 +21,8 @@
     "@forge/agent-runtime": "*",
     "@forge/model-gateway": "*",
     "@forge/tool-host": "*",
-    "@tauri-apps/plugin-http": "^2.0.0"
+    "@tauri-apps/plugin-http": "^2.0.0",
+    "@forge/indexer": "*"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

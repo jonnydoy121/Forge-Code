@@ -30,3 +30,32 @@ export const lspApi = {
   onMessage: (cb: (id: number, msg: string) => void): Promise<UnlistenFn> =>
     listen<{ id: number; msg: string }>("lsp-msg", (e) => cb(e.payload.id, e.payload.msg)),
 };
+
+import type { IndexBackend } from "@forge/indexer";
+
+export interface IndexStatus {
+  indexed_files: number;
+  walked_files: number;
+  symbols: number;
+  chunks: number;
+  embed_calls: number;
+  building: boolean;
+  merkle_root: string;
+}
+
+export const indexApi = {
+  start: (root: string) => invoke<void>("index_start", { root }),
+  status: () => invoke<IndexStatus>("index_status"),
+  onProgress: (cb: (p: { phase: string; done: number; total: number }) => void): Promise<UnlistenFn> => listen<{ phase: string; done: number; total: number }>("index-progress", (e) => cb(e.payload)),
+  onBuilt: (cb: () => void): Promise<UnlistenFn> => listen("index-built", () => cb()),
+  onUpdated: (cb: (files: string[]) => void): Promise<UnlistenFn> => listen<string[]>("index-updated", (e) => cb(e.payload)),
+};
+
+export const indexBackend: IndexBackend = {
+  grep: (pattern, glob, max) => invoke("index_grep", { pattern, glob: glob ?? null, max: max ?? null }),
+  symbol: (name) => invoke("index_symbol", { name }),
+  references: (symbol) => invoke("index_references", { symbol }),
+  repoMap: (focusFiles, tokenBudget) => invoke("index_repo_map", { focusFiles, tokenBudget }),
+  semantic: (query, k) => invoke("index_semantic", { query, k }),
+  cone: (path) => invoke("index_cone", { path }),
+};
