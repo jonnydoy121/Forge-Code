@@ -9,6 +9,8 @@
     "@forge/model-gateway": "*",
     "@forge/tool-host": "*",
     "@forge/review": "*",
-    "@forge/checkpoints": "*"
+    "@forge/checkpoints": "*",
+    "@forge/verify": "*",
+    "@forge/safety": "*"
   }
 }

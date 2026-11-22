@@ -29,6 +29,7 @@ export async function createSession(opts: {
   services: WorkspaceServices;
   sections: () => Promise<ContextSection[]>;
   audit: (e: AuditEntry) => void;
+  onHook?: (event: string, output: string) => void;
 }) {
   const { settings } = opts;
   const gateway = new Gateway({
@@ -39,7 +40,7 @@ export async function createSession(opts: {
   const tools = createToolHost({
     root: opts.services.root,
     fs: opts.services.overlay(tauriFs),
-    tools: [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.editTools],
+    tools: [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.editTools, ...opts.services.verifyTools],
   });
   const runtime = new Runtime({
     gateway,
@@ -47,10 +48,15 @@ export async function createSession(opts: {
     provider: "default",
     model: settings.model,
     sections: opts.sections,
+    gate: opts.services.gate,
+    verify: opts.services.verifyDeps,
+    hooks: opts.services.hooks,
     limits: { maxSteps: settings.maxSteps, maxCostUsd: settings.maxCostUsd },
     audit: (e) => opts.audit({ at: Date.now(), kind: e.kind, name: e.name, detail: e.detail }),
   });
   opts.services.setRuntime(runtime);
+  const started = await runtime.sessionStart().catch(() => null);
+  if (started?.type === "hook") opts.onHook?.("SessionStart", started.output);
   return runtime;
 }
 

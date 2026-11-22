@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { VerificationReport } from "@forge/verify";
 import { revisePrompt, splitLines, withContext, wordDiff, type Hunk, type PendingChanges, type PendingFile } from "@forge/review";
 
 interface Props {
@@ -9,6 +10,30 @@ interface Props {
   onResolved: () => void;
   onRevise: (prompt: string) => void;
   onClose: () => void;
+  /** latest verification report, for per-file badges */
+  report: VerificationReport | null;
+}
+
+const BADGE_KINDS: [string, string][] = [["lint", "lint"], ["typecheck", "types"], ["diagnostics", "editor"], ["test", "tests"]];
+
+/** Per-file verification badges: green when the check passed, red when it reported problems in this file. */
+function Badges({ report, file }: { report: VerificationReport | null; file: string }) {
+  if (!report) return null;
+  return (
+    <span className="flex gap-1" data-testid="badges">
+      {BADGE_KINDS.map(([kind, label]) => {
+        const c = report.checks.find((x) => x.kind === kind && !x.skipped);
+        if (!c) return null;
+        const hit = c.errors.some((e) => e.file && (file.endsWith(e.file) || e.file.endsWith(file)));
+        const bad = !c.ok && (hit || c.errors.every((e) => !e.file));
+        return (
+          <span key={kind} className={`rounded px-1 text-[10px] ${bad ? "bg-red-700/60" : c.ok ? "bg-green-700/50" : "bg-[var(--hover)]"}`} title={`${label}: ${bad ? "problems in this file" : c.ok ? "passed" : "failed elsewhere"}`}>
+            {label} {bad ? "✗" : c.ok ? "✓" : "·"}
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 const rel = (root: string, p: string) => p.slice(root.length + 1);
@@ -116,7 +141,7 @@ function ConflictView({ file, onResolve }: { file: PendingFile; onResolve: (text
   );
 }
 
-export function ReviewPane({ pending, root, version, onResolved, onRevise, onClose }: Props) {
+export function ReviewPane({ pending, root, version, onResolved, onRevise, onClose, report }: Props) {
   const files = useMemo(() => pending.list(), [pending, version]);
   const sets = useMemo(() => pending.changeSets(), [pending, version]);
   const [sel, setSel] = useState<string | null>(null);
@@ -184,6 +209,7 @@ export function ReviewPane({ pending, root, version, onResolved, onRevise, onClo
                   <button key={f.path} data-testid="review-file" className={`flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-[var(--hover)] ${f.path === file?.path ? "bg-[var(--hover)]" : ""}`} onClick={() => { setSel(f.path); setHunkIdx(0); }}>
                     <span className="truncate">{rel(root, f.path)}</span>
                     {f.conflict && <span className="text-amber-400" title="conflict">!</span>}
+                    {f.warnings.length > 0 && <span className="text-red-400" title={f.warnings.join("; ")}>⚠</span>}
                     <span className="ml-auto whitespace-nowrap text-xs"><span className="text-green-400">+{f.stats.added}</span> <span className="text-red-400">-{f.stats.removed}</span></span>
                   </button>
                 ))}
@@ -202,6 +228,12 @@ export function ReviewPane({ pending, root, version, onResolved, onRevise, onClo
                     <button className="rounded bg-red-700/60 px-2 text-xs" data-testid="reject-file" onClick={() => void run(() => pending.resolveAll(file.path, "rejected"))}>Reject file</button>
                   </span>
                 </div>
+                {file.warnings.length > 0 && (
+                  <div className="border-b border-red-700 bg-red-900/40 px-3 py-1 text-xs" role="alert" data-testid="file-warning">
+                    Needs your explicit approval: this change {file.warnings.join("; ")}. Auto-apply is disabled for it.
+                  </div>
+                )}
+                <div className="flex gap-2 px-3 pt-1 text-xs text-[var(--muted)]">Checks: <Badges report={report} file={rel(root, file.path)} /></div>
                 {file.conflict ? (
                   <ConflictView file={file} onResolve={(t) => void run(() => pending.resolveConflict(file.path, t))} />
                 ) : (
@@ -220,7 +252,6 @@ export function ReviewPane({ pending, root, version, onResolved, onRevise, onClo
                         onComment={(text) => onRevise(revisePrompt(rel(root, file.path), h, text))}
                       />
                     ))}
-                    <div className="text-xs text-[var(--muted)]" data-testid="verification">Verification: lint, types and tests run in Phase 5.</div>
                   </div>
                 )}
               </>

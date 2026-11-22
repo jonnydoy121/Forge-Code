@@ -49,7 +49,10 @@ const clip = (t: string, max = 16_000) => (t.length > max ? t.slice(0, max) + "\
 export function createIndexTools(b: IndexBackend): RegisteredTool[] {
   const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], run: RegisteredTool["run"]): RegisteredTool => ({
     spec: { name, description, parameters: { type: "object", properties, required }, class: "read" },
-    run: async (args, ctx) => redactSecrets(clip(await run(args, ctx))),
+    run: async (args, ctx) => {
+      const r = await run(args, ctx);
+      return redactSecrets(clip(typeof r === "string" ? r : r.output));
+    },
   });
   return [
     tool("repo_map", "Ranked outline of the most important files and signatures, personalised to focus_files. Use first to orient yourself.", { focus_files: { type: "array", items: { type: "string" } }, token_budget: { type: "number" } }, [], async (a) =>

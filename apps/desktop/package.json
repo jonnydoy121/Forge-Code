@@ -24,7 +24,9 @@
     "@tauri-apps/plugin-http": "^2.0.0",
     "@forge/indexer": "*",
     "@forge/review": "*",
-    "@forge/checkpoints": "*"
+    "@forge/checkpoints": "*",
+    "@forge/verify": "*",
+    "@forge/safety": "*"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

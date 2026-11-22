@@ -50,6 +50,26 @@ fn git_run(root: String, args: Vec<String>) -> Result<GitResult, String> {
     Ok(GitResult { ok: o.ok, stdout: o.stdout, stderr: o.stderr })
 }
 
+#[derive(serde::Serialize)]
+struct ExecOut {
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+    millis: u64,
+}
+
+/// Run a shell command in the workspace (project checks, hooks). Blocking work runs off the UI thread.
+#[tauri::command]
+async fn run_command(cwd: String, command: String, timeout_ms: u64, env: Vec<(String, String)>) -> Result<ExecOut, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        forge_core::exec::run_shell(&command, Path::new(&cwd), std::time::Duration::from_millis(timeout_ms), &env, 2_000_000)
+            .map(|r| ExecOut { code: r.code, stdout: r.stdout, stderr: r.stderr, timed_out: r.timed_out, millis: r.millis as u64 })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Workspace to open on launch (FORGE_WORKSPACE), used for demos and tests.
 #[tauri::command]
 fn initial_workspace() -> Option<String> {
@@ -71,6 +91,7 @@ fn main() {
             remove_file,
             list_names,
             git_run,
+            run_command,
             initial_workspace,
             pty::pty_spawn,
             pty::pty_write,

@@ -4,7 +4,14 @@ export type Mode = "ask" | "plan" | "agent" | "debug";
 export type ToolClass = "read" | "write" | "execute" | "network";
 
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
-export interface ToolResult { id: string; ok: boolean; output: string }
+export interface TouchedFile { path: string; created: boolean; applied: boolean }
+export interface ToolResult {
+  id: string;
+  ok: boolean;
+  output: string;
+  /** Files a write tool touched, and whether the change reached disk (false = pending review). */
+  touched?: TouchedFile[];
+}
 
 /** Tool description sent to the model. `parameters` is a JSON Schema object. */
 export interface ToolSpec {
@@ -92,7 +99,9 @@ export interface HookConfig { event: HookEvent; command: string }
 export type AgentEvent =
   | StreamEvent
   | { type: "tool_result"; result: ToolResult; name: string }
-  | { type: "limit"; reason: "steps" | "cost" | "aborted" };
+  | { type: "verify"; phase: "fast" | "full"; report: unknown }
+  | { type: "hook"; event: HookEvent; output: string; blocked: boolean }
+  | { type: "limit"; reason: "steps" | "cost" | "aborted" | "verify" };
 export interface AgentRuntime {
   run(req: { mode: Mode; prompt: string }): AsyncIterable<AgentEvent>;
 }

@@ -7,11 +7,13 @@ import { Terminal } from "./components/Terminal";
 import { CommandPalette } from "./components/CommandPalette";
 import { AgentPanel } from "./components/AgentPanel";
 import { ReviewPane } from "./components/ReviewPane";
+import { PermissionPrompt } from "./components/PermissionPrompt";
+import type { AskRequest, Remember } from "@forge/safety";
 import type { Mode } from "@forge/protocol";
-import { createWorkspaceServices, norm, type WorkspaceServices } from "./lib/workspace";
+import { createWorkspaceServices, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
 import { loadSettings } from "./lib/settings";
 import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
-import { applyDiagnostics, clearPendingDecorations, disposeDoc, getDoc, isDirty, openDoc, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
+import { applyDiagnostics, clearPendingDecorations, errorMarkers, disposeDoc, getDoc, isDirty, openDoc, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
 import { LspManager, serverKeyFor, type ServerKey, type ServerStatus } from "./lib/lspManager";
 import { initialTabs, tabsReducer } from "./lib/tabs";
 import { matchesKeybinding, type Command } from "./lib/commands";
@@ -37,6 +39,9 @@ export function App() {
   const registerSend = useCallback((fn: (prompt: string, mode?: Mode) => Promise<void>) => {
     sendRef.current = fn;
   }, []);
+  const [report, setReport] = useState<ReportEvent | null>(null);
+  const [permission, setPermission] = useState<{ req: AskRequest; resolve: (a: Remember) => void } | null>(null);
+  const rootRef = useRef<string | null>(null);
   const lsp = useRef(new LspManager());
 
   useEffect(() => {
@@ -56,6 +61,11 @@ export function App() {
     };
   }, []);
 
+  // Test hook (dev builds only): lets end-to-end tests open a workspace without the native folder dialog.
+  useEffect(() => {
+    if (import.meta.env.DEV) (window as unknown as { __forge?: unknown }).__forge = { openFolder: (d: string) => openFolder(d), services };
+  });
+
   async function openFolder(dir: string) {
     for (const t of tabs.tabs) disposeDoc(t.path);
     dispatch({ type: "reset" });
@@ -64,7 +74,19 @@ export function App() {
     await lsp.current.setRoot(dir);
     setRoot(dir);
     setView("editor");
-    setServices(createWorkspaceServices({ root: dir, mode: () => loadSettings().reviewMode, onChange: () => setVersion((v) => v + 1) }));
+    rootRef.current = dir;
+    const svc = await createWorkspaceServices({
+      root: dir,
+      mode: () => loadSettings().reviewMode,
+      onChange: () => setVersion((v) => v + 1),
+      onReport: (e) => setReport(e),
+      onHook: (event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`),
+      ask: (req) => new Promise<Remember>((resolve) => setPermission({ req, resolve })),
+      diagnostics: async (files) => errorMarkers(dir, files),
+    });
+    setServices(svc);
+    if (svc.hookErrors.length) setNotice(`.forge/hooks.json: ${svc.hookErrors.join("; ")}`);
+    void svc.proposeCommandsSection().catch(() => {});
     setIndexInfo({ progress: "starting" });
     indexApi.start(dir).catch((e) => setNotice(`Indexer failed: ${e}`));
   }
@@ -193,6 +215,7 @@ export function App() {
                 onResolved={() => void refreshFromDisk()}
                 onRevise={(prompt) => void sendRef.current(prompt, "agent")}
                 onClose={() => setView("editor")}
+                report={report?.report ?? null}
               />
             </div>
           )}
@@ -221,6 +244,9 @@ export function App() {
             onOpenReview={() => setView("review")}
             onFilesChanged={() => void refreshFromDisk()}
             registerSend={registerSend}
+            externalReport={report}
+            onReport={setReport}
+            onHook={(event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`)}
           />
         )}
       </div>
@@ -245,6 +271,15 @@ export function App() {
           Ln {cursor[0]}, Col {cursor[1]}
         </span>
       </footer>
+      {permission && (
+        <PermissionPrompt
+          req={permission.req}
+          onAnswer={(a) => {
+            permission.resolve(a);
+            setPermission(null);
+          }}
+        />
+      )}
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>
   );

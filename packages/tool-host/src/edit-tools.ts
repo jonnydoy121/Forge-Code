@@ -1,4 +1,4 @@
-import { isIgnoredDir, isSecretPath, resolveInRoot } from "@forge/protocol";
+import { isIgnoredDir, isSecretPath, resolveInRoot, type TouchedFile } from "@forge/protocol";
 import type { RegisteredTool } from "./index";
 
 export interface EditOutcome {
@@ -6,6 +6,10 @@ export interface EditOutcome {
   added: number;
   removed: number;
   checkpoint?: string;
+  /** the file did not exist before this change */
+  created?: boolean;
+  /** why the change needs explicit developer approval even in auto-apply modes (suppressions, weakened tests) */
+  warnings?: string[];
 }
 
 /** Where edits go. In the app this is the PendingChanges model; the tools never touch disk directly. */
@@ -29,11 +33,16 @@ function target(root: string, raw: unknown): string {
   return path;
 }
 
-function describeOutcome(path: string, o: EditOutcome, root: string): string {
+function describeOutcome(path: string, o: EditOutcome, root: string): { output: string; touched: TouchedFile[] } {
+  return { output: describeText(path, o, root), touched: [{ path, created: o.created ?? false, applied: o.status === "applied" }] };
+}
+
+function describeText(path: string, o: EditOutcome, root: string): string {
   const rel = path.slice(root.replace(/\/+$/, "").length + 1);
   const delta = `+${o.added} -${o.removed}`;
   switch (o.status) {
     case "pending":
+      if (o.warnings?.length) return `Proposed change to ${rel} (${delta}) but it is FLAGGED and needs the developer's explicit approval: it ${o.warnings.join("; ")}. Do not make checks pass by weakening tests or suppressing errors. Fix the underlying problem instead.`;
       return `Proposed change to ${rel} (${delta}). It is pending the developer's review and is not on disk yet; reading the file shows your proposed version.`;
     case "applied":
       return `Applied change to ${rel} (${delta}); checkpoint ${o.checkpoint ?? "saved"}.`;

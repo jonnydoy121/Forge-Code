@@ -8,6 +8,9 @@ import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type A
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
 import { Timeline } from "./Timeline";
+import { ReportCard } from "./ReportCard";
+import type { VerificationReport } from "@forge/verify";
+import type { ReportEvent } from "../lib/workspace";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
 
@@ -15,7 +18,8 @@ type Item =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; name: string; ok: boolean; output: string }
-  | { kind: "notice"; text: string };
+  | { kind: "notice"; text: string }
+  | { kind: "report"; report: VerificationReport; source: string };
 
 interface Props {
   root: string | null;
@@ -29,9 +33,13 @@ interface Props {
   onFilesChanged: () => void;
   /** lets other UI (review comments) send a prompt through the agent */
   registerSend: (fn: (prompt: string, mode?: Mode) => Promise<void>) => void;
+  /** reports produced outside a run (accepted changes, manual "Run checks") */
+  externalReport: ReportEvent | null;
+  onReport: (e: ReportEvent) => void;
+  onHook: (event: string, output: string) => void;
 }
 
-export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend }: Props) {
+export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook }: Props) {
   const [settings, setSettings] = useState<AgentSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState(false);
   const [mode, setMode] = useState<Mode>("ask");
@@ -59,6 +67,14 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     runtime.current = null; // new workspace or settings: build a fresh session on next send
   }, [root, settings]);
 
+  const seenReport = useRef(0);
+  useEffect(() => {
+    if (externalReport && externalReport.seq !== seenReport.current) {
+      seenReport.current = externalReport.seq;
+      setItems((i) => [...i, { kind: "report", report: externalReport.report, source: externalReport.source === "accepted-changes" ? "after you accepted changes" : "manual" }]);
+    }
+  }, [externalReport]);
+
   const update = (patch: Partial<AgentSettings>) => {
     const next = { ...settings, ...patch };
     setSettings(next);
@@ -79,6 +95,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           settings,
           services,
           audit: (e) => setAudit((a) => [...a, e]),
+          onHook: (event, output) => onHook(event, output),
           sections: async () => {
             const out = [];
             for (const p of chipsRef.current) {
@@ -112,8 +129,16 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           });
         } else if (ev.type === "tool_result") {
           setItems((i) => [...i.slice(0, -1), { kind: "tool", name: ev.name, ok: ev.result.ok, output: ev.result.output }, { kind: "assistant", text: "" }]);
+        } else if (ev.type === "verify") {
+          const report = ev.report as VerificationReport;
+          setItems((i) => [...i.slice(0, -1), { kind: "report", report, source: "agent run" }, { kind: "assistant", text: "" }]);
+          const seq = Date.now() + Math.random(); // already shown inline; mark it seen so the effect below does not add it twice
+          seenReport.current = seq;
+          onReport({ report, source: "agent", seq });
+        } else if (ev.type === "hook") {
+          if (ev.output) onHook(ev.event, ev.output);
         } else if (ev.type === "limit") {
-          setItems((i) => [...i, { kind: "notice", text: `Stopped: ${ev.reason} limit reached.` }]);
+          setItems((i) => [...i, { kind: "notice", text: ev.reason === "verify" ? "Stopped: checks kept failing, see the report above." : `Stopped: ${ev.reason} limit reached.` }]);
         }
       }
       setCost(rt.costUsd);
@@ -185,6 +210,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         </div>
       )}
 
+      {services && (
+        <div className="flex gap-2 border-b border-[var(--border)] px-3 py-1 text-xs">
+          <button className="underline" data-testid="run-checks" onClick={() => void services.runVerification("full").catch((e) => setItems((i) => [...i, { kind: "notice", text: `Checks failed to run: ${e}` }]))}>Run checks</button>
+          <button className="underline" data-testid="detect-commands" onClick={() => void services.proposeCommandsSection().then((r) => setItems((i) => [...i, { kind: "notice", text: r === "proposed" ? "Proposed a ## Commands section in AGENTS.md for review." : r === "exists" ? "AGENTS.md already has a ## Commands section." : "No project commands detected." }]))}>Detect commands</button>
+        </div>
+      )}
       {pendingCount > 0 && (
         <button className="border-b border-[var(--border)] bg-amber-900/30 px-3 py-1 text-left text-xs text-amber-200" onClick={onOpenReview} data-testid="pending-banner">
           {pendingCount} file{pendingCount === 1 ? "" : "s"} with pending changes. Click to review.
@@ -222,7 +253,9 @@ ${diff}`);
         <div className="flex-1 space-y-2 overflow-auto p-3 text-sm" data-testid="messages">
           {items.length === 0 && <p className="text-[var(--muted)]">Ask a question about this codebase. Mode "ask" is read-only.</p>}
           {items.map((it, i) =>
-            it.kind === "tool" ? (
+            it.kind === "report" ? (
+              <ReportCard key={i} report={it.report} source={it.source} />
+            ) : it.kind === "tool" ? (
               <details key={i} className="rounded border border-[var(--border)] px-2 py-1 text-xs" data-testid="tool-call">
                 <summary>{it.ok ? "✓" : "✗"} {it.name}</summary>
                 <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap">{it.output}</pre>

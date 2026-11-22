@@ -34,7 +34,7 @@ describe("propose in review mode", () => {
     const { disk, p } = setup();
     disk.set("/ws/a.ts", "a\nb\nc");
     const r = await p.propose("/ws/a.ts", "a\nB\nc", "capitalise b");
-    expect(r).toEqual({ status: "pending", stats: { added: 1, removed: 1 } });
+    expect(r).toMatchObject({ status: "pending", stats: { added: 1, removed: 1 }, created: false });
     expect(disk.get("/ws/a.ts")).toBe("a\nb\nc");
     expect(p.effective("/ws/a.ts")).toBe("a\nB\nc");
     expect(p.effective("/ws/other.ts")).toBeUndefined();
@@ -211,5 +211,27 @@ describe("revisePrompt", () => {
     expect(prompt).toContain("ONLY one hunk");
     expect(prompt).toContain("- console.log(1)\n+ console.error(1)");
     expect(prompt).toContain("use the existing logger here");
+  });
+});
+
+describe("guard (weakening protection)", () => {
+  it("forces flagged edits to wait for the developer even in auto mode", async () => {
+    const disk = new Map<string, string>([["/ws/a.test.ts", "expect(a).toBe(1);"]]);
+    const applied: string[] = [];
+    const p = new PendingChanges({
+      fs: { read: async (x) => disk.get(x) ?? null, write: async (x, c) => void disk.set(x, c), remove: async (x) => void disk.delete(x) },
+      checkpoints: { snapshot: async (files, meta) => ({ id: "cp", files, createdAt: 0, ...meta }) },
+      mode: () => "auto",
+      guard: (_path, _base, proposed) => (proposed?.includes("skip") ? ["skips a test"] : []),
+      onApplied: async (x) => void applied.push(x),
+    });
+    const flagged = await p.propose("/ws/a.test.ts", "it.skip('x')");
+    expect(flagged).toMatchObject({ status: "pending", warnings: ["skips a test"] });
+    expect(disk.get("/ws/a.test.ts")).toBe("expect(a).toBe(1);");
+    expect(p.get("/ws/a.test.ts")!.warnings).toEqual(["skips a test"]);
+    // a clean refinement clears the flag and auto-applies, firing onApplied
+    const clean = await p.propose("/ws/a.test.ts", "expect(a).toBe(2);");
+    expect(clean.status).toBe("applied");
+    expect(applied).toEqual(["/ws/a.test.ts"]);
   });
 });

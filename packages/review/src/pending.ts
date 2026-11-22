@@ -20,7 +20,11 @@ export interface PendingDeps {
   planFiles?(): string[] | null;
   /** Length of the agent conversation, recorded in each checkpoint so the timeline can restore it. */
   historyLength?(): number;
+  /** Returns reasons an edit must not be auto-applied (suppressions, weakened tests). Empty = fine. */
+  guard?(path: string, base: string | null, proposed: string | null): string[];
   onChange?(): void;
+  /** Called after a file has been written (or deleted) on disk, e.g. to run PostEdit hooks. */
+  onApplied?(path: string, origin: "agent-auto" | "developer"): void | Promise<void>;
 }
 
 export interface PendingFile {
@@ -36,12 +40,14 @@ export interface PendingFile {
   reasons: Record<string, string>;
   resolved: Record<string, Decision>;
   stats: DiffStats;
+  /** Reasons this edit needs explicit approval even in auto-apply modes. */
+  warnings: string[];
   /** Set when the file changed on disk after the proposal and could not be merged automatically. */
   conflict?: { merged: string; conflicts: Conflict[] };
 }
 
 export type ProposeStatus = "pending" | "applied" | "conflict" | "noop";
-export interface ProposeResult { status: ProposeStatus; stats: DiffStats; checkpoint?: string }
+export interface ProposeResult { status: ProposeStatus; stats: DiffStats; checkpoint?: string; created?: boolean; warnings?: string[] }
 
 export interface ChangeSetInfo { id: string; label: string; step?: number; files: string[] }
 
@@ -52,6 +58,8 @@ export class PendingChanges {
   private files = new Map<string, PendingFile>();
   private sets = new Map<string, ChangeSetInfo>();
   private currentSet = "";
+  /** Who triggered the write currently in progress: auto-apply of an agent proposal, or a developer accept. */
+  private origin: "agent-auto" | "developer" = "developer";
   private seq = 0;
 
   constructor(private deps: PendingDeps) {
@@ -96,14 +104,14 @@ export class PendingChanges {
     this.deps.onChange?.();
   }
 
-  async propose(path: string, proposed: string | null, reason = ""): Promise<ProposeResult> {
+  async propose(path: string, proposed: string | null, reason = "", opts: { requireReview?: boolean } = {}): Promise<ProposeResult> {
     const existing = this.files.get(path);
     const base = existing ? existing.base : await this.deps.fs.read(path);
     const oldHunkIds = new Set(existing?.hunks.map((h) => h.id));
     if (proposed === base) {
       this.files.delete(path);
       this.notify();
-      return { status: "noop", stats: { added: 0, removed: 0 } };
+      return { status: "noop", stats: { added: 0, removed: 0 }, created: base === null };
     }
     const hunks = diffHunks(splitLines(textOf(base)), splitLines(textOf(proposed)));
     const reasons: Record<string, string> = {};
@@ -122,6 +130,7 @@ export class PendingChanges {
       reasons,
       resolved,
       stats: statsOf(hunks),
+      warnings: this.deps.guard?.(path, base, proposed) ?? [],
     };
     this.files.set(path, file);
     const set = this.sets.get(file.changeSet);
@@ -130,12 +139,20 @@ export class PendingChanges {
 
     const mode = this.deps.mode();
     const inPlan = this.deps.planFiles?.()?.includes(path) ?? false;
+    if (opts.requireReview) return { status: "pending", stats: file.stats, created: base === null };
+    if (file.warnings.length > 0) return { status: "pending", stats: file.stats, created: base === null, warnings: file.warnings };
     if (mode === "auto" || (mode === "plan-files" && inPlan)) {
-      const r = await this.resolveAll(path, "accepted");
+      this.origin = "agent-auto";
+      let r;
+      try {
+        r = await this.resolveAll(path, "accepted");
+      } finally {
+        this.origin = "developer";
+      }
       const status: ProposeStatus = r.status === "applied" ? "applied" : r.status === "conflict" ? "conflict" : "noop";
-      return { status, stats: file.stats, checkpoint: "checkpoint" in r ? r.checkpoint : undefined };
+      return { status, stats: file.stats, checkpoint: "checkpoint" in r ? r.checkpoint : undefined, created: base === null };
     }
-    return { status: "pending", stats: file.stats };
+    return { status: "pending", stats: file.stats, created: base === null };
   }
 
   /** Accept or reject one hunk. When every hunk of the file is decided, the file is finalised. */
@@ -241,6 +258,7 @@ export class PendingChanges {
     else await this.deps.fs.write(f.path, content);
     this.files.delete(f.path);
     this.notify();
+    await this.deps.onApplied?.(f.path, this.origin);
     return cp.id;
   }
 }

@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Phase 5 - Verification loop
+- `@forge/verify`: command discovery (package.json, Makefile, pyproject, Cargo, go.mod, CI) round-tripped through an AGENTS.md `## Commands` section, structured error parsers (tsc, eslint, cargo, node:test, pytest, vitest/jest, go test, ruff/flake8, tracebacks; verified against real tool output), scoped fast checks and full runs, verification report with the Verified rule, test-weakening guard (suppressions, skipped tests, removed assertions), lifecycle hooks (.forge/hooks.json: PreToolUse, PostToolUse, PostEdit, Stop, SessionStart; PreCompact/PostCompact reserved for Phase 7).
+- Agent runtime verify-fix loop: fast checks after each change set that reaches disk, full run before finishing, structured feedback to the model, 5 attempts then a tool-less report turn (what was tried, remaining error, hypothesis). Flagged edits are forced through developer approval even in auto modes.
+- `@forge/safety`: permission gate (allow once / session / always pattern, persisted in .forge/permissions.json) with a deny list that always asks and can never be remembered; remembered patterns cannot authorise chained commands.
+- Rust command runner with timeout, output caps and a Windows quoting fix; `run_checks` tool (execute-class, gated); report card, permission prompt and per-file verification badges in the UI.
 ### Phase 4 - Editing, review, checkpoints
 - `@forge/review`: Myers line diff, word-level highlights, per-hunk apply, three-way merge (diff3), PendingChanges model (review / plan-files / auto modes, per-hunk reasons, change sets, conflict detection that never overwrites developer edits).
 - `@forge/checkpoints`: persisted FileCheckpointStore (snapshot before every write, 100+ retained, rollback by checkpoint, step, change set, file or hunk; rollbacks are themselves checkpointed).

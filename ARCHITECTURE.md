@@ -53,5 +53,10 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 - Conflicts: if disk differs from the proposal's base at accept time, a three-way merge runs; clean merges apply, overlapping edits surface a conflict view and nothing is written.
 - Known gaps: pending changes live in memory (not persisted across restarts); the conversation transcript is not yet persisted (Phase 7); the index does not see pending proposals, only the overlay used by read_file does.
 
+## Verification (Phase 5)
+- The agent runs only the project's own configured checks (`run_checks`), never arbitrary shell. A general `run_command` tool and the PTY-visible agent terminal arrive with the sandbox in Phase 8.
+- Verification runs against files on disk. In review mode, proposals are pending, so the run reports "Unverified: changes are pending your review" and verification runs automatically after the developer accepts the last pending file. Auto and plan-files modes verify autonomously.
+- Heuristic limits: weakening detection catches suppressions, skips, removed assertions and weaker matchers; it cannot tell that a changed expected value is wrong, so an edit to a test file should still be read by the developer.
+
 ## Status
-Phases 0-4 complete. See CHANGELOG.md.
+Phases 0-5 complete. See CHANGELOG.md.

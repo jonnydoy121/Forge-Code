@@ -79,7 +79,9 @@ describe("multi-file refactor: review and full rollback", () => {
     // The agent re-reading api.ts saw its own proposed version, not the stale disk.
     const reread = gateway.requests[3]!.messages.filter((m) => m.role === "tool").at(-1)!.content;
     expect(reread).toContain("svc.findById(id)");
-    expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect(events.some((e) => e.type === "done")).toBe(true);
+    // Pending edits cannot be verified yet; the run says so explicitly.
+    expect(events.at(-1)).toMatchObject({ type: "verify", report: { verified: false, summary: expect.stringContaining("pending your review") } });
 
     // Review: accept everything in the change set.
     const result = await pending.resolveEverything("accepted", pending.currentChangeSet);

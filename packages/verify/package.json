@@ -1,0 +1,12 @@
+{
+  "name": "@forge/verify",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@forge/protocol": "*",
+    "@forge/review": "*",
+    "@forge/tool-host": "*"
+  }
+}

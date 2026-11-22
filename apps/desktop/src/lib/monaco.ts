@@ -134,3 +134,17 @@ export function clearPendingDecorations(path: string) {
   if (d && decorationIds.has(path)) d.model.deltaDecorations(decorationIds.get(path)!, []);
   decorationIds.delete(path);
 }
+
+/** Error-severity LSP markers for the given workspace-relative files that are open in the editor. */
+export function errorMarkers(root: string, relFiles: string[]): { file: string; line: number; col: number; message: string; rule?: string; severity: "error" }[] {
+  const out: { file: string; line: number; col: number; message: string; rule?: string; severity: "error" }[] = [];
+  const base = root.split("\\").join("/").replace(/\/+$/, "");
+  for (const [path, d] of docs) {
+    const rel = path.split("\\").join("/").replace(base + "/", "");
+    if (!relFiles.includes(rel)) continue;
+    for (const m of monaco.editor.getModelMarkers({ resource: d.model.uri })) {
+      if (m.severity === monaco.MarkerSeverity.Error) out.push({ file: rel, line: m.startLineNumber, col: m.startColumn, message: m.message, rule: typeof m.code === "string" ? m.code : undefined, severity: "error" });
+    }
+  }
+  return out;
+}

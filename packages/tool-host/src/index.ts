@@ -11,6 +11,7 @@ import {
   type ToolHost,
   type ToolResult,
   type ToolSpec,
+  type TouchedFile,
 } from "@forge/protocol";
 
 export interface FsEntry { name: string; isDir: boolean }
@@ -30,7 +31,7 @@ export interface ToolContext {
 
 export interface RegisteredTool {
   spec: ToolSpec;
-  run(args: Record<string, unknown>, ctx: ToolContext): Promise<string>;
+  run(args: Record<string, unknown>, ctx: ToolContext): Promise<string | { output: string; touched?: TouchedFile[] }>;
 }
 
 export const MAX_OUTPUT_CHARS = 20_000;
@@ -150,7 +151,8 @@ export function createToolHost(opts: ToolHostOptions): ToolHost {
         return { id: call.id, ok: false, output: `tool ${call.name} is not available in ${mode} mode` };
       }
       try {
-        return { id: call.id, ok: true, output: await tool.run(call.args, opts) };
+        const r = await tool.run(call.args, opts);
+        return typeof r === "string" ? { id: call.id, ok: true, output: r } : { id: call.id, ok: true, output: r.output, touched: r.touched };
       } catch (e) {
         return { id: call.id, ok: false, output: e instanceof Error ? e.message : String(e) };
       }

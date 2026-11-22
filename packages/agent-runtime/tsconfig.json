@@ -23,6 +23,12 @@
     },
     {
       "path": "../checkpoints"
+    },
+    {
+      "path": "../verify"
+    },
+    {
+      "path": "../safety"
     }
   ]
 }
