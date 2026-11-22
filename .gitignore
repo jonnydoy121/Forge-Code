@@ -11,3 +11,8 @@ test-results/
 .forge/sessions/
 .forge/checkpoints/
 .forge/index/
+dist-ts/
+*.tsbuildinfo
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/
