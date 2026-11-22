@@ -8,6 +8,10 @@ import { CommandPalette } from "./components/CommandPalette";
 import { AgentPanel } from "./components/AgentPanel";
 import { ReviewPane } from "./components/ReviewPane";
 import { PermissionPrompt } from "./components/PermissionPrompt";
+import { PlanPane } from "./components/PlanPane";
+import { AddFilePrompt, QuestionPrompt } from "./components/Prompts";
+import { PlanExecutor, type Question } from "@forge/plans";
+import type { RunOutcome } from "./components/AgentPanel";
 import type { AskRequest, Remember } from "@forge/safety";
 import type { Mode } from "@forge/protocol";
 import { createWorkspaceServices, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
@@ -34,11 +38,16 @@ export function App() {
   const [indexInfo, setIndexInfo] = useState<{ progress?: string; status?: IndexStatus }>({});
   const [services, setServices] = useState<WorkspaceServices | null>(null);
   const [version, setVersion] = useState(0);
-  const [view, setView] = useState<"editor" | "review">("editor");
-  const sendRef = useRef<(prompt: string, mode?: Mode) => Promise<void>>(async () => {});
-  const registerSend = useCallback((fn: (prompt: string, mode?: Mode) => Promise<void>) => {
+  const [view, setView] = useState<"editor" | "review" | "plan">("editor");
+  const sendRef = useRef<(prompt: string, mode?: Mode) => Promise<RunOutcome>>(async () => ({}));
+  const registerSend = useCallback((fn: (prompt: string, mode?: Mode) => Promise<RunOutcome>) => {
     sendRef.current = fn;
   }, []);
+  const [activePlan, setActivePlan] = useState<string | null>(null);
+  const [building, setBuilding] = useState(false);
+  const buildAbort = useRef<AbortController | null>(null);
+  const [questionReq, setQuestionReq] = useState<{ questions: Question[]; resolve: (a: string[]) => void } | null>(null);
+  const [addFileReq, setAddFileReq] = useState<{ question: string; path: string; resolve: (b: boolean) => void } | null>(null);
   const [report, setReport] = useState<ReportEvent | null>(null);
   const [permission, setPermission] = useState<{ req: AskRequest; resolve: (a: Remember) => void } | null>(null);
   const rootRef = useRef<string | null>(null);
@@ -83,10 +92,18 @@ export function App() {
       onHook: (event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`),
       ask: (req) => new Promise<Remember>((resolve) => setPermission({ req, resolve })),
       diagnostics: async (files) => errorMarkers(dir, files),
+      askQuestions: (questions) => new Promise<string[]>((resolve) => setQuestionReq({ questions, resolve })),
+      askAddFile: (question, path) => new Promise<boolean>((resolve) => setAddFileReq({ question, path, resolve })),
+      onPlanWritten: (slug) => {
+        setActivePlan(slug);
+        setView("plan");
+      },
+      onBlocked: (path, message) => setNotice(message),
     });
     setServices(svc);
     if (svc.hookErrors.length) setNotice(`.forge/hooks.json: ${svc.hookErrors.join("; ")}`);
     void svc.proposeCommandsSection().catch(() => {});
+    void svc.plans.list().then((l) => setActivePlan(l[0]?.slug ?? null));
     setIndexInfo({ progress: "starting" });
     indexApi.start(dir).catch((e) => setNotice(`Indexer failed: ${e}`));
   }
@@ -97,6 +114,49 @@ export function App() {
     for (const path of changed) dispatch({ type: "dirty", path, dirty: false });
     setVersion((v) => v + 1);
   }, []);
+
+  /** Execute an approved plan step by step (explicit Build action, or a plain "go"). */
+  async function startBuild(slug: string) {
+    if (!services || building) return;
+    setBuilding(true);
+    setActivePlan(slug);
+    setView("plan");
+    const ctl = new AbortController();
+    buildAbort.current = ctl;
+    services.planGuard.activate(slug);
+    const failedChecks = (r?: { checks: { ok: boolean; skipped?: string }[] }) => !!r && r.checks.some((c) => !c.ok && !c.skipped);
+    const executor = new PlanExecutor({
+      store: services.plans,
+      signal: ctl.signal,
+      beginChangeSet: (label, n) => {
+        services.pending.beginChangeSet(label, n);
+        services.planGuard.setStep(n);
+      },
+      runStep: async (_step, prompt) => {
+        const outcome = await sendRef.current(prompt, "agent");
+        if (outcome.error) return { ok: false, reason: outcome.error };
+        if (outcome.limit) return { ok: false, reason: `stopped: ${outcome.limit}` };
+        // Review mode: the step is not done until the developer has resolved its pending changes.
+        while (services.pending.list().length > 0 && !ctl.signal.aborted) await new Promise((r) => setTimeout(r, 300));
+        if (failedChecks(outcome.report)) return { ok: false, reason: "checks failed" };
+        if (!outcome.report || outcome.report.summary.includes("pending")) {
+          const r = await services.runVerification("full");
+          if (failedChecks(r)) return { ok: false, reason: "checks failed after your review" };
+        }
+        return { ok: true };
+      },
+    });
+    try {
+      const res = await executor.build(slug);
+      setNotice(res.status === "done" ? "Plan complete." : res.status === "failed" ? `Plan paused: step ${res.step} failed${res.reason ? ` (${res.reason})` : ""}.` : "Plan paused.");
+    } catch (e) {
+      setNotice(`Build failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      services.planGuard.deactivate();
+      setBuilding(false);
+      void refreshFromDisk();
+    }
+  }
 
   const chooseFolder = useCallback(async () => {
     const dir = await openDialog({ directory: true, multiple: false });
@@ -144,6 +204,7 @@ export function App() {
       { id: "save", title: "File: Save", keybinding: "Ctrl+S", run: () => void save() },
       { id: "close-tab", title: "View: Close Editor", keybinding: "Ctrl+W", run: () => tabs.active && void closeTab(tabs.active) },
       { id: "terminal", title: "View: Toggle Terminal", keybinding: "Ctrl+`", run: () => toggleTerminal() },
+      { id: "plan", title: "View: Show Plan", keybinding: "Ctrl+Shift+L", run: () => setView((v) => (v === "plan" ? "editor" : "plan")) },
       { id: "review", title: "View: Review Pending Changes", keybinding: "Ctrl+Shift+R", run: () => setView((v) => (v === "review" ? "editor" : "review")) },
       { id: "agent-panel", title: "View: Toggle Agent Panel", keybinding: "Ctrl+L", run: () => setAgentOpen((o) => !o) },
       { id: "theme", title: "View: Toggle Light/Dark Theme", run: () => setDark((d) => !d) },
@@ -219,7 +280,25 @@ export function App() {
               />
             </div>
           )}
-          <div className={`min-h-0 flex-1 ${view === "review" ? "hidden" : ""}`}>
+          {view === "plan" && services && (
+            <div className="min-h-0 flex-1">
+              <PlanPane
+                services={services}
+                version={version}
+                slug={activePlan}
+                building={building}
+                onSelect={setActivePlan}
+                onBuild={(slug) => void startBuild(slug)}
+                onPause={() => buildAbort.current?.abort()}
+                onEditFile={(p) => {
+                  setView("editor");
+                  void openFile(p);
+                }}
+                onClose={() => setView("editor")}
+              />
+            </div>
+          )}
+          <div className={`min-h-0 flex-1 ${view !== "editor" ? "hidden" : ""}`}>
             <Editor
               path={tabs.active}
               dark={dark}
@@ -244,6 +323,8 @@ export function App() {
             onOpenReview={() => setView("review")}
             onFilesChanged={() => void refreshFromDisk()}
             registerSend={registerSend}
+            activePlanSlug={activePlan}
+            onStartBuild={(slug) => void startBuild(slug)}
             externalReport={report}
             onReport={setReport}
             onHook={(event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`)}
@@ -255,6 +336,7 @@ export function App() {
         <span data-testid="index-status" title={indexInfo.status ? `${indexInfo.status.symbols} symbols, ${indexInfo.status.chunks} chunks` : ""}>
           {indexInfo.progress ? `Indexing: ${indexInfo.progress}` : indexInfo.status ? `Indexed ${indexInfo.status.indexed_files} files` : ""}
         </span>
+        {building && <span data-testid="building" className="text-blue-400">Building plan…</span>}
         {pendingFiles.length > 0 && (
           <button className="text-amber-400 underline" data-testid="pending-count" onClick={() => setView("review")}>
             {pendingFiles.length} pending
@@ -271,6 +353,25 @@ export function App() {
           Ln {cursor[0]}, Col {cursor[1]}
         </span>
       </footer>
+      {questionReq && (
+        <QuestionPrompt
+          questions={questionReq.questions}
+          onAnswer={(a) => {
+            questionReq.resolve(a);
+            setQuestionReq(null);
+          }}
+        />
+      )}
+      {addFileReq && (
+        <AddFilePrompt
+          question={addFileReq.question}
+          path={addFileReq.path}
+          onAnswer={(b) => {
+            addFileReq.resolve(b);
+            setAddFileReq(null);
+          }}
+        />
+      )}
       {permission && (
         <PermissionPrompt
           req={permission.req}

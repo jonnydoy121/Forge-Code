@@ -17,6 +17,8 @@ export interface EditSink {
   /** Current content the agent should edit against: pending proposal if any, else disk. null = missing file. */
   read(path: string): Promise<string | null>;
   propose(path: string, proposed: string | null, reason: string): Promise<EditOutcome>;
+  /** Optional gate before any edit (e.g. the approved plan). Returns null to allow, or a message for the model. */
+  authorize?(path: string): Promise<string | null>;
 }
 
 const str = (v: unknown, name: string) => {
@@ -70,6 +72,8 @@ export function createEditTools(sink: EditSink): RegisteredTool[] {
       },
       async run(args, ctx) {
         const path = target(ctx.root, args.path);
+        const blocked = await sink.authorize?.(path);
+        if (blocked) throw new Error(blocked);
         const oldS = str(args.old_string, "old_string");
         const newS = str(args.new_string, "new_string");
         if (!oldS) throw new Error("old_string must not be empty; use write_file to create a file");
@@ -91,6 +95,8 @@ export function createEditTools(sink: EditSink): RegisteredTool[] {
       },
       async run(args, ctx) {
         const path = target(ctx.root, args.path);
+        const blocked = await sink.authorize?.(path);
+        if (blocked) throw new Error(blocked);
         return describeOutcome(path, await sink.propose(path, str(args.content, "content"), typeof args.reason === "string" ? args.reason : ""), ctx.root);
       },
     },
@@ -103,6 +109,8 @@ export function createEditTools(sink: EditSink): RegisteredTool[] {
       },
       async run(args, ctx) {
         const path = target(ctx.root, args.path);
+        const blocked = await sink.authorize?.(path);
+        if (blocked) throw new Error(blocked);
         if ((await sink.read(path)) === null) throw new Error(`file does not exist: ${args.path}`);
         return describeOutcome(path, await sink.propose(path, null, typeof args.reason === "string" ? args.reason : ""), ctx.root);
       },

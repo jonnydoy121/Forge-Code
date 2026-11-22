@@ -58,5 +58,10 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 - Verification runs against files on disk. In review mode, proposals are pending, so the run reports "Unverified: changes are pending your review" and verification runs automatically after the developer accepts the last pending file. Auto and plan-files modes verify autonomously.
 - Heuristic limits: weakening detection catches suppressions, skips, removed assertions and weaker matchers; it cannot tell that a changed expected value is wrong, so an edit to a test file should still be read by the developer.
 
+## Planning (Phase 6)
+- Plan mode exposes read tools plus `write_plan`/`ask_user`; write and execute tools are not listed at all. Build switches to Agent mode and runs one step per agent turn, tagging changes with the step number.
+- A step is marked verified when its agent turn ends without failed checks and the developer has resolved the step's pending changes; if no checks are configured the step is still marked verified, with an "Unverified" report beside it.
+- Not yet: splitting plan steps across sub-agents (Phase 7 adds sub-agents generally).
+
 ## Status
-Phases 0-5 complete. See CHANGELOG.md.
+Phases 0-6 complete. See CHANGELOG.md.

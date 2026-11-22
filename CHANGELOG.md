@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Phase 6 - Planning
+- `@forge/plans`: plan files (.forge/plans/<slug>.md) with a forgiving parser, validation (goal, tasks, acceptance checks), in-place status/comment/file edits, `write_plan` and `ask_user` tools (at most 3 questions, with defaults), PlanStore, PlanExecutor (step-by-step, status tracked in the file, pause/resume from the first unverified step), PlanGuard (edits outside the plan stop and ask; approval records the file in the plan), conservative intent classification ("go" builds; "update the plan and go" never does) and a large-request heuristic.
+- Mode enforcement: new `plan` tool class (Plan mode can read and write the plan file only); mode-specific system prompts.
+- UI: plan pane with live checklist (pending / in progress / verified / failed), Build, Pause, Resume, step comments, question and add-file prompts, "Plan first?" suggestion for large requests. Each step's changes are tagged with its step number in the review pane and checkpoints.
 ### Phase 5 - Verification loop
 - `@forge/verify`: command discovery (package.json, Makefile, pyproject, Cargo, go.mod, CI) round-tripped through an AGENTS.md `## Commands` section, structured error parsers (tsc, eslint, cargo, node:test, pytest, vitest/jest, go test, ruff/flake8, tracebacks; verified against real tool output), scoped fast checks and full runs, verification report with the Verified rule, test-weakening guard (suppressions, skipped tests, removed assertions), lifecycle hooks (.forge/hooks.json: PreToolUse, PostToolUse, PostEdit, Stop, SessionStart; PreCompact/PostCompact reserved for Phase 7).
 - Agent runtime verify-fix loop: fast checks after each change set that reaches disk, full run before finishing, structured feedback to the model, 5 attempts then a tool-less report turn (what was tried, remaining error, hypothesis). Flagged edits are forced through developer approval even in auto modes.

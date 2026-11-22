@@ -26,7 +26,8 @@
     "@forge/review": "*",
     "@forge/checkpoints": "*",
     "@forge/verify": "*",
-    "@forge/safety": "*"
+    "@forge/safety": "*",
+    "@forge/plans": "*"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

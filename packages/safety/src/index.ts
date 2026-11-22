@@ -80,7 +80,7 @@ export function createPermissionGate(opts: GateOptions): PermissionGate & { rese
       session = [];
     },
     async check(cls, call): Promise<PermissionDecision> {
-      if (cls === "read" || cls === "write") return "allow";
+      if (cls === "read" || cls === "write" || cls === "plan") return "allow";
       const command = commandOf(call);
       const summary = command ? `${call.name}: ${command}` : `${call.name} ${JSON.stringify(call.args).slice(0, 120)}`;
       const danger = command ? denyReason(command) : null;

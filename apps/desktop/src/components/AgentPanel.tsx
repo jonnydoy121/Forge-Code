@@ -8,11 +8,20 @@ import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type A
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
 import { Timeline } from "./Timeline";
+import { classifyIntent, looksLarge } from "@forge/plans";
 import { ReportCard } from "./ReportCard";
 import type { VerificationReport } from "@forge/verify";
 import type { ReportEvent } from "../lib/workspace";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
+
+export interface RunOutcome {
+  /** the run stopped on a limit (steps, cost, verify, aborted) */
+  limit?: string;
+  /** last verification report produced during the run */
+  report?: VerificationReport;
+  error?: string;
+}
 
 type Item =
   | { kind: "user"; text: string }
@@ -32,14 +41,18 @@ interface Props {
   /** called after a run or a restore so the editor can refresh files from disk */
   onFilesChanged: () => void;
   /** lets other UI (review comments) send a prompt through the agent */
-  registerSend: (fn: (prompt: string, mode?: Mode) => Promise<void>) => void;
+  registerSend: (fn: (prompt: string, mode?: Mode) => Promise<RunOutcome>) => void;
+  /** slug of the plan currently shown, if any */
+  activePlanSlug: string | null;
+  /** start executing a plan (explicit Build action or a clear "go") */
+  onStartBuild: (slug: string) => void;
   /** reports produced outside a run (accepted changes, manual "Run checks") */
   externalReport: ReportEvent | null;
   onReport: (e: ReportEvent) => void;
   onHook: (event: string, output: string) => void;
 }
 
-export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook }: Props) {
+export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook, activePlanSlug, onStartBuild }: Props) {
   const [settings, setSettings] = useState<AgentSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState(false);
   const [mode, setMode] = useState<Mode>("ask");
@@ -52,6 +65,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [showAudit, setShowAudit] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [suggest, setSuggest] = useState<string | null>(null);
   const runtime = useRef<Runtime | null>(null);
   const abort = useRef<AbortController | null>(null);
   const chipsRef = useRef(chips);
@@ -81,10 +95,33 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     saveSettings(next);
   };
 
-  async function send(override?: { prompt: string; mode?: Mode }) {
+  async function send(override?: { prompt: string; mode?: Mode; skipSuggest?: boolean }): Promise<RunOutcome> {
+    const outcome: RunOutcome = {};
     const prompt = (override?.prompt ?? input).trim();
     const runMode = override?.mode ?? mode;
-    if (!prompt || busy || !root || !services) return;
+    if (!prompt || busy || !root || !services) return outcome;
+
+    // Only the explicit Build action or a plain, unqualified "go" starts execution; ambiguous wording never does.
+    if (!override && activePlanSlug) {
+      const intent = classifyIntent(prompt);
+      if (intent === "build") {
+        setInput("");
+        setItems((i) => [...i, { kind: "user", text: prompt }]);
+        onStartBuild(activePlanSlug);
+        return outcome;
+      }
+      if (intent === "ambiguous") {
+        setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "notice", text: "That could mean two different things, so nothing was executed. Use the Build button, or send just \"go\"." }]);
+        setInput("");
+        return outcome;
+      }
+    }
+    // Large-looking requests: suggest Plan mode first.
+    if (!override && runMode !== "plan" && runMode !== "debug" && suggest !== prompt && looksLarge(prompt)) {
+      setSuggest(prompt);
+      return outcome;
+    }
+    setSuggest(null);
     if (!override) setInput("");
     setBusy(true);
     setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "assistant", text: "" }]);
@@ -131,6 +168,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           setItems((i) => [...i.slice(0, -1), { kind: "tool", name: ev.name, ok: ev.result.ok, output: ev.result.output }, { kind: "assistant", text: "" }]);
         } else if (ev.type === "verify") {
           const report = ev.report as VerificationReport;
+          outcome.report = report;
           setItems((i) => [...i.slice(0, -1), { kind: "report", report, source: "agent run" }, { kind: "assistant", text: "" }]);
           const seq = Date.now() + Math.random(); // already shown inline; mark it seen so the effect below does not add it twice
           seenReport.current = seq;
@@ -138,25 +176,28 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         } else if (ev.type === "hook") {
           if (ev.output) onHook(ev.event, ev.output);
         } else if (ev.type === "limit") {
+          outcome.limit = ev.reason;
           setItems((i) => [...i, { kind: "notice", text: ev.reason === "verify" ? "Stopped: checks kept failing, see the report above." : `Stopped: ${ev.reason} limit reached.` }]);
         }
       }
       setCost(rt.costUsd);
       if (rt.lastContext) setMeter({ total: rt.lastContext.totalTokens, entries: rt.lastContext.meter });
     } catch (e) {
-      setItems((i) => [...i, { kind: "notice", text: `Error: ${e instanceof Error ? e.message : String(e)}` }]);
+      outcome.error = e instanceof Error ? e.message : String(e);
+      setItems((i) => [...i, { kind: "notice", text: `Error: ${outcome.error}` }]);
     } finally {
       setItems((i) => i.filter((x) => !(x.kind === "assistant" && x.text === "")));
       setBusy(false);
       onFilesChanged();
     }
+    return outcome;
   }
   const sendRef = useRef(send);
   sendRef.current = send;
   useEffect(() => {
     registerSend(async (prompt, m) => {
       setMode(m ?? "agent");
-      await sendRef.current({ prompt, mode: m ?? "agent" });
+      return sendRef.current({ prompt, mode: m ?? "agent" });
     });
   }, [registerSend]);
 
@@ -270,6 +311,15 @@ ${diff}`);
         </div>
       )}
 
+      {suggest && (
+        <div className="border-t border-[var(--border)] bg-blue-900/30 px-3 py-2 text-xs" data-testid="plan-suggestion">
+          This looks like a large change. Plan first so you can review and edit the steps before any code changes?
+          <div className="mt-1 flex gap-2">
+            <button className="rounded bg-blue-700/70 px-2 py-0.5" data-testid="suggest-plan" onClick={() => { setMode("plan"); void send({ prompt: suggest, mode: "plan" }); setInput(""); }}>Switch to Plan mode</button>
+            <button className="rounded bg-[var(--hover)] px-2 py-0.5" data-testid="suggest-continue" onClick={() => { void send({ prompt: suggest, mode, skipSuggest: true }); setInput(""); }}>Continue in {mode} mode</button>
+          </div>
+        </div>
+      )}
       <footer className="border-t border-[var(--border)] p-2">
         <div className="mb-1 flex flex-wrap gap-1" data-testid="chips">
           {chips.map((c) => (

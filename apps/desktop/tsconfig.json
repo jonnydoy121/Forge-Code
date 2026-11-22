@@ -43,6 +43,9 @@
     },
     {
       "path": "../../packages/safety"
+    },
+    {
+      "path": "../../packages/plans"
     }
   ]
 }

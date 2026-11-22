@@ -2,6 +2,7 @@ import { Gateway, type FetchLike } from "@forge/model-gateway";
 import { Runtime, type ContextSection } from "@forge/agent-runtime";
 import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
+import { modePrompt } from "@forge/plans";
 import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
 import type { WorkspaceServices } from "./workspace";
@@ -40,7 +41,7 @@ export async function createSession(opts: {
   const tools = createToolHost({
     root: opts.services.root,
     fs: opts.services.overlay(tauriFs),
-    tools: [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.editTools, ...opts.services.verifyTools],
+    tools: [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.editTools, ...opts.services.verifyTools, ...opts.services.planTools],
   });
   const runtime = new Runtime({
     gateway,
@@ -48,6 +49,7 @@ export async function createSession(opts: {
     provider: "default",
     model: settings.model,
     sections: opts.sections,
+    modePrompt,
     gate: opts.services.gate,
     verify: opts.services.verifyDeps,
     hooks: opts.services.hooks,

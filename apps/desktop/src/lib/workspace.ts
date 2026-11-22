@@ -15,6 +15,7 @@ import {
   type VerificationReport,
 } from "@forge/verify";
 import { createPermissionGate, type AskRequest, type Remember } from "@forge/safety";
+import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/plans";
 import type { Runtime, VerifyDeps } from "@forge/agent-runtime";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexBackend } from "./ipc";
@@ -65,6 +66,9 @@ export interface WorkspaceServices {
   /** Propose a `## Commands` section for AGENTS.md as a reviewable change, if the file lacks one. */
   proposeCommandsSection(): Promise<"proposed" | "exists" | "nothing-detected">;
   hookErrors: string[];
+  plans: PlanStore;
+  planGuard: PlanGuard;
+  planTools: RegisteredTool[];
 }
 
 const SESSION_KEY = "forge.session.v1";
@@ -94,6 +98,12 @@ export async function createWorkspaceServices(opts: {
   ask: (req: AskRequest) => Promise<Remember>;
   /** Current LSP diagnostics for workspace-relative files. */
   diagnostics: (files: string[]) => Promise<StructuredError[]>;
+  /** Plan mode: clarifying questions with suggested defaults. */
+  askQuestions: (qs: Question[]) => Promise<string[]>;
+  /** Build: "Step 3 also needs utils/date.ts. Add it?" */
+  askAddFile: (question: string, path: string, step: number | undefined) => Promise<boolean>;
+  onPlanWritten: (slug: string) => void;
+  onBlocked: (path: string, message: string) => void;
 }): Promise<WorkspaceServices> {
   const root = norm(opts.root).replace(/\/+$/, "");
   const sessionId = sessionIdFor(root);
@@ -159,7 +169,11 @@ export async function createWorkspaceServices(opts: {
     },
   });
 
+  const plans = new PlanStore(diskFs, root, opts.onChange);
+  const planGuard = new PlanGuard({ store: plans, askAddFile: opts.askAddFile, onBlocked: opts.onBlocked }, root);
+
   const sink: EditSink = {
+    authorize: (path) => planGuard.authorize(path),
     read: async (p) => {
       const e = pending.effective(p);
       return e !== undefined ? e : diskFs.read(p);
@@ -234,5 +248,8 @@ export async function createWorkspaceServices(opts: {
       return "proposed";
     },
     hookErrors: parsedHooks.errors,
+    plans,
+    planGuard,
+    planTools: createPlanTools({ store: plans, askUser: opts.askQuestions, onPlanWritten: opts.onPlanWritten }),
   };
 }

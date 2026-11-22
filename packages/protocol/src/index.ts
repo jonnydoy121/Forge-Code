@@ -1,7 +1,8 @@
 // Typed contracts between Forge components. See ARCHITECTURE.md.
 
 export type Mode = "ask" | "plan" | "agent" | "debug";
-export type ToolClass = "read" | "write" | "execute" | "network";
+/** "plan" = writing the plan file only (allowed in Plan mode). */
+export type ToolClass = "read" | "write" | "execute" | "network" | "plan";
 
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
 export interface TouchedFile { path: string; created: boolean; applied: boolean }

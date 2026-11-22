@@ -7,6 +7,7 @@ import {
   type ModelGateway,
   type PermissionGate,
   type ToolCall,
+  type ToolClass,
   type ToolHost,
   type ToolResult,
 } from "@forge/protocol";
@@ -46,6 +47,8 @@ export interface RuntimeDeps {
   limits?: Partial<RuntimeLimits>;
   budgetTokens?: number;
   basePrompt?: string;
+  /** Extra system text per mode (Plan mode instructions, etc.). */
+  modePrompt?: (mode: Mode) => string | undefined;
   verify?: VerifyDeps;
   hooks?: HookRunner;
   /** Audit hook: every model call and tool call. */
@@ -134,7 +137,10 @@ export class Runtime implements AgentRuntime {
       const specs = finalReport ? [] : deps.tools.listTools(req.mode);
       const ctx = assembleContext({
         base: deps.basePrompt ?? BASE_PROMPT,
-        sections: (await deps.sections?.()) ?? [],
+        sections: [
+          ...(deps.modePrompt?.(req.mode) ? [{ id: "mode", label: `Mode: ${req.mode}`, text: deps.modePrompt(req.mode)!, priority: 0 }] : []),
+          ...((await deps.sections?.()) ?? []),
+        ],
         history: this.history,
         budget: deps.budgetTokens ?? 100_000,
       });
@@ -205,7 +211,7 @@ export class Runtime implements AgentRuntime {
     yield { type: "limit", reason: "steps" };
   }
 
-  private async dispatch(mode: Mode, call: ToolCall, cls: "read" | "write" | "execute" | "network" | undefined): Promise<ToolResult> {
+  private async dispatch(mode: Mode, call: ToolCall, cls: ToolClass | undefined): Promise<ToolResult> {
     const { deps } = this;
     if (!cls) return { id: call.id, ok: false, output: `tool ${call.name} is not available in ${mode} mode` };
     if (deps.hooks) {
