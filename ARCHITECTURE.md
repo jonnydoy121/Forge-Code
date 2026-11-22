@@ -36,5 +36,11 @@ Desktop shell: Tauri 2 (Rust core + web UI). Core services are mixed on purpose:
 ## Protocols
 MCP client (external tools), ACP client (external agents), LSP client (diagnostics, definitions, references).
 
+## Editor core (Phase 1)
+- UI: `apps/desktop/src` (React + Monaco + xterm.js). Pure logic in `src/lib` (LspClient, tabs, commands, URIs) has no Tauri/Monaco imports so it is unit-tested.
+- Rust host (`src-tauri`): thin Tauri commands over `crates/forge-core` (fs, LSP framing and server resolution) plus PTY and LSP process management. Events: `pty-data`, `lsp-msg`.
+- LSP servers are npm devDependencies resolved from `<workspace>/node_modules/.bin`, then the repo's, then PATH. Missing servers show "LSP: unavailable" with the reason.
+- Monaco is pinned to 0.52.2 (import layout changed in later releases).
+
 ## Status
-Phase 0: contracts and stubs only. See CHANGELOG.md.
+Phase 1 complete. See CHANGELOG.md.

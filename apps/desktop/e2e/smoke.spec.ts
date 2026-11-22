@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("app shell renders", async ({ page }) => {
+test("web shell renders the empty state", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("title")).toHaveText("Forge");
+  await expect(page.getByTestId("open-folder")).toBeVisible();
 });

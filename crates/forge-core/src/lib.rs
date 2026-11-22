@@ -1,4 +1,7 @@
-//! Forge core services (indexer, sandbox, checkpoints). Phase 0: version probe only.
+//! Forge core services. Phase 1: filesystem helpers and LSP plumbing.
+
+pub mod fs;
+pub mod lsp;
 
 pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
