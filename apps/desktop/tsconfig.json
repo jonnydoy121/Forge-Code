@@ -31,6 +31,12 @@
     },
     {
       "path": "../../packages/indexer"
+    },
+    {
+      "path": "../../packages/review"
+    },
+    {
+      "path": "../../packages/checkpoints"
     }
   ]
 }

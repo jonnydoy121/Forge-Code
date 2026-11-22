@@ -17,6 +17,12 @@
     },
     {
       "path": "../tool-host"
+    },
+    {
+      "path": "../review"
+    },
+    {
+      "path": "../checkpoints"
     }
   ]
 }

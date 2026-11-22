@@ -22,6 +22,34 @@ fn write_file(path: String, contents: String) -> Result<(), String> {
     fs::write_text(Path::new(&path), &contents).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn read_file_opt(path: String) -> Result<Option<String>, String> {
+    fs::read_text_opt(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_file(path: String) -> Result<(), String> {
+    fs::remove_file(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_names(path: String) -> Result<Vec<String>, String> {
+    fs::list_names(Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct GitResult {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+#[tauri::command]
+fn git_run(root: String, args: Vec<String>) -> Result<GitResult, String> {
+    let o = forge_core::git::run(Path::new(&root), &args)?;
+    Ok(GitResult { ok: o.ok, stdout: o.stdout, stderr: o.stderr })
+}
+
 /// Workspace to open on launch (FORGE_WORKSPACE), used for demos and tests.
 #[tauri::command]
 fn initial_workspace() -> Option<String> {
@@ -39,6 +67,10 @@ fn main() {
             list_dir,
             read_file,
             write_file,
+            read_file_opt,
+            remove_file,
+            list_names,
+            git_run,
             initial_workspace,
             pty::pty_spawn,
             pty::pty_write,

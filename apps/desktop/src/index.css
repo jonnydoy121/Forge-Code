@@ -18,3 +18,13 @@
 }
 html, body, #root { height: 100%; margin: 0; }
 body { font-family: system-ui, sans-serif; }
+
+/* Pending agent changes layered on the editor */
+.pending-removed { background: rgba(248, 81, 73, 0.22); }
+.pending-changed { background: rgba(210, 153, 34, 0.22); }
+.pending-insert { border-bottom: 2px solid rgba(46, 160, 67, 0.9); }
+.pending-insert-top { border-top: 2px solid rgba(46, 160, 67, 0.9); }
+.diff-del { background: rgba(248, 81, 73, 0.16); }
+.diff-add { background: rgba(46, 160, 67, 0.16); }
+.diff-del mark { background: rgba(248, 81, 73, 0.45); color: inherit; }
+.diff-add mark { background: rgba(46, 160, 67, 0.45); color: inherit; }

@@ -5,6 +5,9 @@ import type { Runtime, MeterEntry } from "@forge/agent-runtime";
 import { createSession, type AuditEntry } from "../lib/agentSession";
 import { fsApi, indexBackend } from "../lib/ipc";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
+import { completeOnce } from "../lib/agentSession";
+import type { WorkspaceServices } from "../lib/workspace";
+import { Timeline } from "./Timeline";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
 
@@ -17,9 +20,18 @@ type Item =
 interface Props {
   root: string | null;
   activePath: string | null;
+  services: WorkspaceServices | null;
+  pendingCount: number;
+  /** bumps when pending changes or checkpoints change */
+  version: number;
+  onOpenReview: () => void;
+  /** called after a run or a restore so the editor can refresh files from disk */
+  onFilesChanged: () => void;
+  /** lets other UI (review comments) send a prompt through the agent */
+  registerSend: (fn: (prompt: string, mode?: Mode) => Promise<void>) => void;
 }
 
-export function AgentPanel({ root, activePath }: Props) {
+export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend }: Props) {
   const [settings, setSettings] = useState<AgentSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState(false);
   const [mode, setMode] = useState<Mode>("ask");
@@ -31,6 +43,7 @@ export function AgentPanel({ root, activePath }: Props) {
   const [cost, setCost] = useState(0);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [showAudit, setShowAudit] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
   const runtime = useRef<Runtime | null>(null);
   const abort = useRef<AbortController | null>(null);
   const chipsRef = useRef(chips);
@@ -52,10 +65,11 @@ export function AgentPanel({ root, activePath }: Props) {
     saveSettings(next);
   };
 
-  async function send() {
-    const prompt = input.trim();
-    if (!prompt || busy || !root) return;
-    setInput("");
+  async function send(override?: { prompt: string; mode?: Mode }) {
+    const prompt = (override?.prompt ?? input).trim();
+    const runMode = override?.mode ?? mode;
+    if (!prompt || busy || !root || !services) return;
+    if (!override) setInput("");
     setBusy(true);
     setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "assistant", text: "" }]);
     try {
@@ -63,6 +77,7 @@ export function AgentPanel({ root, activePath }: Props) {
         runtime.current = await createSession({
           root,
           settings,
+          services,
           audit: (e) => setAudit((a) => [...a, e]),
           sections: async () => {
             const out = [];
@@ -89,7 +104,7 @@ export function AgentPanel({ root, activePath }: Props) {
       }
       const rt = runtime.current;
       abort.current = new AbortController();
-      for await (const ev of rt.run({ mode, prompt, signal: abort.current.signal })) {
+      for await (const ev of rt.run({ mode: runMode, prompt, signal: abort.current.signal })) {
         if (ev.type === "text") {
           setItems((i) => {
             const last = i[i.length - 1];
@@ -108,8 +123,17 @@ export function AgentPanel({ root, activePath }: Props) {
     } finally {
       setItems((i) => i.filter((x) => !(x.kind === "assistant" && x.text === "")));
       setBusy(false);
+      onFilesChanged();
     }
   }
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  useEffect(() => {
+    registerSend(async (prompt, m) => {
+      setMode(m ?? "agent");
+      await sendRef.current({ prompt, mode: m ?? "agent" });
+    });
+  }, [registerSend]);
 
   const offMachine = sendsCodeOffMachine(settings);
   const breakdown = meter?.entries.map((e) => `${e.label}: ${e.tokens}${e.trimmed ? " (trimmed)" : ""}`).join("\n") ?? "";
@@ -132,7 +156,8 @@ export function AgentPanel({ root, activePath }: Props) {
         <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={offMachine ? "Prompts and attached code are sent to a remote server" : "Local model: nothing leaves this machine"}>
           {offMachine ? "remote" : "local"}
         </span>
-        <button className="text-xs underline" onClick={() => setShowAudit((s) => !s)}>Audit</button>
+        <button className="text-xs underline" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
+        <button className="text-xs underline" onClick={() => { setShowAudit((s) => !s); setShowTimeline(false); }}>Audit</button>
         <button className="text-xs underline" onClick={() => setShowSettings((s) => !s)} data-testid="settings-toggle">Settings</button>
       </header>
 
@@ -148,12 +173,45 @@ export function AgentPanel({ root, activePath }: Props) {
           <label className="block">Model <input className="ml-2 w-52 rounded bg-[var(--hover)] px-1" value={settings.model} onChange={(e) => update({ model: e.target.value })} /></label>
           <label className="block">Base URL <input data-testid="base-url" className="ml-2 w-52 rounded bg-[var(--hover)] px-1" placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></label>
           <label className="block">API key <input type="password" className="ml-2 w-52 rounded bg-[var(--hover)] px-1" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></label>
+          <label className="block">Edits
+            <select data-testid="review-mode" className="ml-2 rounded bg-[var(--hover)]" value={settings.reviewMode} onChange={(e) => update({ reviewMode: e.target.value as AgentSettings["reviewMode"] })}>
+              <option value="review">Review every edit</option>
+              <option value="plan-files">Auto-apply files in the plan</option>
+              <option value="auto">Auto-apply everything (checkpointed)</option>
+            </select>
+          </label>
           <label className="block">Max steps <input type="number" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={settings.maxSteps} onChange={(e) => update({ maxSteps: Number(e.target.value) || 12 })} /> Max $ <input type="number" step="0.5" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={settings.maxCostUsd} onChange={(e) => update({ maxCostUsd: Number(e.target.value) || 2 })} /></label>
           <p className="text-[var(--muted)]">Key is stored in this app's local storage (OS keychain arrives in Phase 8).</p>
         </div>
       )}
 
-      {showAudit ? (
+      {pendingCount > 0 && (
+        <button className="border-b border-[var(--border)] bg-amber-900/30 px-3 py-1 text-left text-xs text-amber-200" onClick={onOpenReview} data-testid="pending-banner">
+          {pendingCount} file{pendingCount === 1 ? "" : "s"} with pending changes. Click to review.
+        </button>
+      )}
+      {showTimeline && services ? (
+        <div className="flex-1 overflow-auto">
+          <Timeline
+            services={services}
+            version={version}
+            onFilesChanged={onFilesChanged}
+            onRestoreConversation={(n) => {
+              if (runtime.current) runtime.current.history.length = Math.min(n, runtime.current.history.length);
+              setItems((i) => [...i, { kind: "notice", text: `Conversation restored to ${n} messages.` }]);
+            }}
+            draftCommitMessage={async (diff) => {
+              try {
+                return await completeOnce(settings, `Write a concise git commit message (imperative mood, max 72 char subject, optional short body) for this change. Reply with the message only.
+
+${diff}`);
+              } catch {
+                return null;
+              }
+            }}
+          />
+        </div>
+      ) : showAudit ? (
         <ul className="flex-1 overflow-auto p-2 font-mono text-xs" data-testid="audit-log">
           {audit.length === 0 && <li className="text-[var(--muted)]">No activity yet.</li>}
           {audit.map((a, i) => (
@@ -196,7 +254,7 @@ export function AgentPanel({ root, activePath }: Props) {
         <textarea
           data-testid="agent-input"
           rows={3}
-          disabled={!root}
+          disabled={!root || !services}
           placeholder={root ? "Ask about the code (Enter to send, Shift+Tab cycles mode)" : "Open a folder first"}
           className="w-full resize-none rounded bg-[var(--hover)] p-2 text-sm outline-none"
           value={input}

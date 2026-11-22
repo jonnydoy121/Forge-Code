@@ -10,6 +10,7 @@ Set-Content "$ws\a.ts" 'const x: number = "not a number";' -NoNewline
 Set-Content "$ws\tsconfig.json" '{"compilerOptions":{"strict":true}}' -NoNewline
 Set-Content "$ws\b.py" 'y: int = "no"' -NoNewline
 Set-Content "$ws\c.ts" 'export function greet(name: string): string { return name; }' -NoNewline
+Set-Content "$ws\use.ts" "import { greet } from './c';`ngreet('x');`n" -NoNewline
 
 Get-Process forge-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
 $env:FORGE_WORKSPACE = $ws

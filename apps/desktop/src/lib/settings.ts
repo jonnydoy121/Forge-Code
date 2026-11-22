@@ -1,4 +1,5 @@
 import type { ProviderConfig } from "@forge/model-gateway";
+import type { ReviewMode } from "@forge/review";
 
 export interface AgentSettings {
   provider: ProviderConfig["kind"];
@@ -7,6 +8,7 @@ export interface AgentSettings {
   apiKey: string;
   maxSteps: number;
   maxCostUsd: number;
+  reviewMode: ReviewMode;
 }
 
 export const DEFAULT_MODELS: Record<AgentSettings["provider"], string> = {
@@ -22,6 +24,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   apiKey: "",
   maxSteps: 12,
   maxCostUsd: 2,
+  reviewMode: "review",
 };
 
 const KEY = "forge.settings.v1";

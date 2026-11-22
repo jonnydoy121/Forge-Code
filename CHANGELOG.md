@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Phase 4 - Editing, review, checkpoints
+- `@forge/review`: Myers line diff, word-level highlights, per-hunk apply, three-way merge (diff3), PendingChanges model (review / plan-files / auto modes, per-hunk reasons, change sets, conflict detection that never overwrites developer edits).
+- `@forge/checkpoints`: persisted FileCheckpointStore (snapshot before every write, 100+ retained, rollback by checkpoint, step, change set, file or hunk; rollbacks are themselves checkpointed).
+- Edit tools (edit_file, write_file, delete_file) behind the same mode enforcement; reads see pending proposals via an overlay.
+- UI: multi-file review pane (inline/side-by-side, Accept/Reject/Edit/Explain/Comment per hunk, keyboard shortcuts, three-way conflict view), inline editor decorations, checkpoint timeline (restore code / conversation / both, hunk rollback, shell-side-effect warning), commit with drafted message and branch creation through an allowlisted git surface.
 ### Phase 3 - Indexing
 - Rust indexer in forge-core: .gitignore/.forgeignore/secret-aware walk, Merkle tree change detection, tree-sitter symbols/imports/references/chunks for TS/JS, Python, Go, Rust, Java, C#, C, C++, SQLite persistence, local hashing embeddings cached by chunk hash, file graph with personalised PageRank repo map, debounced file watcher.
 - Retrieval tools for the agent: repo_map, semantic_search, grep, symbol, references, dependency_cone; repo map attached to context automatically.

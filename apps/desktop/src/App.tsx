@@ -6,8 +6,12 @@ import { TabBar } from "./components/TabBar";
 import { Terminal } from "./components/Terminal";
 import { CommandPalette } from "./components/CommandPalette";
 import { AgentPanel } from "./components/AgentPanel";
+import { ReviewPane } from "./components/ReviewPane";
+import type { Mode } from "@forge/protocol";
+import { createWorkspaceServices, norm, type WorkspaceServices } from "./lib/workspace";
+import { loadSettings } from "./lib/settings";
 import { fsApi, indexApi, type IndexStatus } from "./lib/ipc";
-import { applyDiagnostics, disposeDoc, getDoc, isDirty, openDoc, saveDoc } from "./lib/monaco";
+import { applyDiagnostics, clearPendingDecorations, disposeDoc, getDoc, isDirty, openDoc, reloadOpenDocs, saveDoc, showPendingDecorations } from "./lib/monaco";
 import { LspManager, serverKeyFor, type ServerKey, type ServerStatus } from "./lib/lspManager";
 import { initialTabs, tabsReducer } from "./lib/tabs";
 import { matchesKeybinding, type Command } from "./lib/commands";
@@ -26,6 +30,13 @@ export function App() {
   const [counts, setCounts] = useState<Record<string, [number, number]>>({});
   const [servers, setServers] = useState<Partial<Record<ServerKey, ServerStatus>>>({});
   const [indexInfo, setIndexInfo] = useState<{ progress?: string; status?: IndexStatus }>({});
+  const [services, setServices] = useState<WorkspaceServices | null>(null);
+  const [version, setVersion] = useState(0);
+  const [view, setView] = useState<"editor" | "review">("editor");
+  const sendRef = useRef<(prompt: string, mode?: Mode) => Promise<void>>(async () => {});
+  const registerSend = useCallback((fn: (prompt: string, mode?: Mode) => Promise<void>) => {
+    sendRef.current = fn;
+  }, []);
   const lsp = useRef(new LspManager());
 
   useEffect(() => {
@@ -52,9 +63,18 @@ export function App() {
     setServers({});
     await lsp.current.setRoot(dir);
     setRoot(dir);
+    setView("editor");
+    setServices(createWorkspaceServices({ root: dir, mode: () => loadSettings().reviewMode, onChange: () => setVersion((v) => v + 1) }));
     setIndexInfo({ progress: "starting" });
     indexApi.start(dir).catch((e) => setNotice(`Indexer failed: ${e}`));
   }
+
+  /** After agent runs, accepts and rollbacks: pull changed files from disk into open editors. */
+  const refreshFromDisk = useCallback(async () => {
+    const changed = await reloadOpenDocs();
+    for (const path of changed) dispatch({ type: "dirty", path, dirty: false });
+    setVersion((v) => v + 1);
+  }, []);
 
   const chooseFolder = useCallback(async () => {
     const dir = await openDialog({ directory: true, multiple: false });
@@ -102,6 +122,7 @@ export function App() {
       { id: "save", title: "File: Save", keybinding: "Ctrl+S", run: () => void save() },
       { id: "close-tab", title: "View: Close Editor", keybinding: "Ctrl+W", run: () => tabs.active && void closeTab(tabs.active) },
       { id: "terminal", title: "View: Toggle Terminal", keybinding: "Ctrl+`", run: () => toggleTerminal() },
+      { id: "review", title: "View: Review Pending Changes", keybinding: "Ctrl+Shift+R", run: () => setView((v) => (v === "review" ? "editor" : "review")) },
       { id: "agent-panel", title: "View: Toggle Agent Panel", keybinding: "Ctrl+L", run: () => setAgentOpen((o) => !o) },
       { id: "theme", title: "View: Toggle Light/Dark Theme", run: () => setDark((d) => !d) },
     ],
@@ -128,6 +149,18 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [commands]);
 
+  const pendingFiles = services ? services.pending.list() : [];
+  // Inline green/red decorations for pending changes on the active file (updates as proposals stream in).
+  useEffect(() => {
+    if (!services) return;
+    for (const t of tabs.tabs) {
+      const pf = services.pending.get(norm(t.path));
+      if (pf && !pf.conflict) {
+        showPendingDecorations(t.path, pf.hunks.filter((h) => !pf.resolved[h.id]).map((h) => ({ oldStart: h.oldStart, oldCount: h.oldLines.length, added: h.newLines })));
+      } else clearPendingDecorations(t.path);
+    }
+  }, [services, version, tabs.tabs, tabs.active]);
+
   const activeDoc = tabs.active ? getDoc(tabs.active) : undefined;
   const activeCounts = tabs.active ? counts[decodeURIComponent(pathToUri(tabs.active)).toLowerCase()] : undefined;
   const serverKey = activeDoc ? serverKeyFor(activeDoc.language) : null;
@@ -151,7 +184,19 @@ export function App() {
         <section className="flex min-w-0 flex-1 flex-col">
           <TabBar state={tabs} onActivate={(p) => dispatch({ type: "activate", path: p })} onClose={(p) => void closeTab(p)} />
           {notice && <div className="bg-red-900/40 px-3 py-1 text-sm" role="alert">{notice}</div>}
-          <div className="min-h-0 flex-1">
+          {view === "review" && services && (
+            <div className="min-h-0 flex-1">
+              <ReviewPane
+                pending={services.pending}
+                root={services.root}
+                version={version}
+                onResolved={() => void refreshFromDisk()}
+                onRevise={(prompt) => void sendRef.current(prompt, "agent")}
+                onClose={() => setView("editor")}
+              />
+            </div>
+          )}
+          <div className={`min-h-0 flex-1 ${view === "review" ? "hidden" : ""}`}>
             <Editor
               path={tabs.active}
               dark={dark}
@@ -166,13 +211,29 @@ export function App() {
             </div>
           )}
         </section>
-        {agentOpen && <AgentPanel root={root} activePath={tabs.active} />}
+        {agentOpen && (
+          <AgentPanel
+            root={root}
+            activePath={tabs.active}
+            services={services}
+            pendingCount={pendingFiles.length}
+            version={version}
+            onOpenReview={() => setView("review")}
+            onFilesChanged={() => void refreshFromDisk()}
+            registerSend={registerSend}
+          />
+        )}
       </div>
       <footer className="flex gap-4 border-t border-[var(--border)] bg-[var(--panel)] px-3 py-0.5 text-xs text-[var(--muted)]" data-testid="status">
         <span>{root ?? "No folder open"}</span>
         <span data-testid="index-status" title={indexInfo.status ? `${indexInfo.status.symbols} symbols, ${indexInfo.status.chunks} chunks` : ""}>
           {indexInfo.progress ? `Indexing: ${indexInfo.progress}` : indexInfo.status ? `Indexed ${indexInfo.status.indexed_files} files` : ""}
         </span>
+        {pendingFiles.length > 0 && (
+          <button className="text-amber-400 underline" data-testid="pending-count" onClick={() => setView("review")}>
+            {pendingFiles.length} pending
+          </button>
+        )}
         <span className="ml-auto">{activeDoc?.language ?? ""}</span>
         {server && (
           <span data-testid="lsp-status" title={server.detail}>

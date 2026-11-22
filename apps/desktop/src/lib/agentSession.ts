@@ -4,6 +4,7 @@ import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
 import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
+import type { WorkspaceServices } from "./workspace";
 
 export const tauriFs: FsBackend = {
   readFile: fsApi.readFile,
@@ -25,6 +26,7 @@ export interface AuditEntry { at: number; kind: string; name: string; detail?: s
 export async function createSession(opts: {
   root: string;
   settings: AgentSettings;
+  services: WorkspaceServices;
   sections: () => Promise<ContextSection[]>;
   audit: (e: AuditEntry) => void;
 }) {
@@ -34,8 +36,12 @@ export async function createSession(opts: {
     onRequest: (i) => opts.audit({ at: Date.now(), kind: "model-request", name: `${i.provider}/${i.model}`, detail: `${i.url} ${i.local ? "(local)" : "(REMOTE)"}` }),
   });
   gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
-  const tools = createToolHost({ root: opts.root, fs: tauriFs, tools: [...READ_TOOLS, ...createIndexTools(indexBackend)] });
-  return new Runtime({
+  const tools = createToolHost({
+    root: opts.services.root,
+    fs: opts.services.overlay(tauriFs),
+    tools: [...READ_TOOLS, ...createIndexTools(indexBackend), ...opts.services.editTools],
+  });
+  const runtime = new Runtime({
     gateway,
     tools,
     provider: "default",
@@ -44,4 +50,17 @@ export async function createSession(opts: {
     limits: { maxSteps: settings.maxSteps, maxCostUsd: settings.maxCostUsd },
     audit: (e) => opts.audit({ at: Date.now(), kind: e.kind, name: e.name, detail: e.detail }),
   });
+  opts.services.setRuntime(runtime);
+  return runtime;
+}
+
+/** One-shot completion without tools (commit messages, summaries). Returns the streamed text. */
+export async function completeOnce(settings: AgentSettings, prompt: string): Promise<string> {
+  const gateway = new Gateway({ fetch: await pickFetch() });
+  gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
+  let text = "";
+  for await (const ev of gateway.stream({ provider: "default", model: settings.model, messages: [{ role: "user", content: prompt }] })) {
+    if (ev.type === "text") text += ev.delta;
+  }
+  return text.trim();
 }

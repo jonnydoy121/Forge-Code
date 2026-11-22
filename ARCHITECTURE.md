@@ -48,5 +48,10 @@ MCP client (external tools), ACP client (external agents), LSP client (diagnosti
 - Deviations from the spec, deliberate: embeddings are a local feature-hashing model (offline, deterministic, not neural; the `Embedder` trait is the seam for Ollama or hosted models); vectors are scanned brute-force instead of using sqlite-vec; graph edges are name-based (calls, inheritance and type uses all appear as identifier references) plus resolved imports; test-covers edges are derived from test-named files.
 - Process model: the TypeScript "workers" (runtime, gateway, tool host) run inside the webview today, calling Rust for fs, indexing, PTY and LSP. Moving them to separate processes remains open.
 
+## Review and checkpoints (Phase 4)
+- Agent writes go through `EditSink` -> `PendingChanges`; disk is written only on accept (or immediately in auto mode), always after a checkpoint of the pre-write content.
+- Conflicts: if disk differs from the proposal's base at accept time, a three-way merge runs; clean merges apply, overlapping edits surface a conflict view and nothing is written.
+- Known gaps: pending changes live in memory (not persisted across restarts); the conversation transcript is not yet persisted (Phase 7); the index does not see pending proposals, only the overlay used by read_file does.
+
 ## Status
-Phases 0-3 complete. See CHANGELOG.md.
+Phases 0-4 complete. See CHANGELOG.md.

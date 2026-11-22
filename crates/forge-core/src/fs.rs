@@ -40,8 +40,37 @@ pub fn read_text(path: &Path) -> io::Result<String> {
     String::from_utf8(bytes).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "not valid UTF-8"))
 }
 
+/// Read a text file, or None if it does not exist.
+pub fn read_text_opt(path: &Path) -> io::Result<Option<String>> {
+    match read_text(path) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Remove a file; succeeds if it is already gone.
+pub fn remove_file(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// Names of entries in a directory (empty if it does not exist).
+pub fn list_names(dir: &Path) -> io::Result<Vec<String>> {
+    match std::fs::read_dir(dir) {
+        Ok(rd) => Ok(rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(vec![]),
+        Err(e) => Err(e),
+    }
+}
+
 /// Write atomically: write a sibling temp file, then rename over the target.
 pub fn write_text(path: &Path, contents: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_extension(format!("{}.forge-tmp", path.extension().and_then(|e| e.to_str()).unwrap_or("")));
     std::fs::write(&tmp, contents)?;
     std::fs::rename(&tmp, path).inspect_err(|_| {
@@ -72,6 +101,19 @@ mod tests {
         write_text(&p, "two").unwrap();
         assert_eq!(read_text(&p).unwrap(), "two");
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn write_creates_parent_dirs_and_missing_reads_are_none() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a/b/c.ts");
+        assert_eq!(read_text_opt(&p).unwrap(), None);
+        write_text(&p, "x").unwrap();
+        assert_eq!(read_text_opt(&p).unwrap().as_deref(), Some("x"));
+        remove_file(&p).unwrap();
+        remove_file(&p).unwrap(); // idempotent
+        assert_eq!(list_names(&d.path().join("nope")).unwrap(), Vec::<String>::new());
+        assert_eq!(list_names(&d.path().join("a")).unwrap(), ["b"]);
     }
 
     #[test]

@@ -157,3 +157,5 @@ export function createToolHost(opts: ToolHostOptions): ToolHost {
     },
   };
 }
+
+export * from "./edit-tools";

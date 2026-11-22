@@ -7,6 +7,8 @@
   "dependencies": {
     "@forge/protocol": "*",
     "@forge/model-gateway": "*",
-    "@forge/tool-host": "*"
+    "@forge/tool-host": "*",
+    "@forge/review": "*",
+    "@forge/checkpoints": "*"
   }
 }

@@ -22,7 +22,9 @@
     "@forge/model-gateway": "*",
     "@forge/tool-host": "*",
     "@tauri-apps/plugin-http": "^2.0.0",
-    "@forge/indexer": "*"
+    "@forge/indexer": "*",
+    "@forge/review": "*",
+    "@forge/checkpoints": "*"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

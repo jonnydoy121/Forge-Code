@@ -51,10 +51,19 @@ export interface PermissionGate {
 }
 
 // Checkpoint store
-export interface Checkpoint { id: string; step?: number; files: string[]; createdAt: number }
+export interface CheckpointMeta { step?: number; changeSet?: string; label?: string; historyLength?: number }
+export interface Checkpoint extends CheckpointMeta { id: string; files: string[]; createdAt: number }
+export interface RollbackSelector {
+  /** Roll back everything from this checkpoint onward (timeline restore). */
+  toCheckpoint?: string;
+  changeSet?: string;
+  step?: number;
+  file?: string;
+}
 export interface CheckpointStore {
-  snapshot(files: string[], meta?: { step?: number }): Promise<Checkpoint>;
+  snapshot(files: string[], meta?: CheckpointMeta): Promise<Checkpoint>;
   restore(id: string, opts?: { file?: string }): Promise<void>;
+  rollback(sel: RollbackSelector): Promise<string[]>;
   list(): Promise<Checkpoint[]>;
 }
 
