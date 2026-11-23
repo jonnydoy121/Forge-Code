@@ -338,5 +338,7 @@ fn find_files_matches_globs_and_plain_substrings_and_skips_excluded_files() {
         assert!(idx.find_files(hidden, 100).unwrap().is_empty(), "{hidden} must not be found");
     }
     assert!(idx.find_files("nothing-like-this", 100).unwrap().is_empty());
-    assert!(idx.find_files("[", 100).is_err(), "a malformed glob is an error, not a panic");
+    // A bracket is a plain character (route segments such as [id]), not the start of a glob.
+    assert!(idx.find_files("[", 100).unwrap().is_empty());
+    assert!(idx.find_files("{", 100).is_err(), "a malformed glob is an error, not a panic");
 }

@@ -150,7 +150,8 @@ export const grepTool: RegisteredTool = {
 
 /** Same matching rule as the indexer's `find_files`: a pattern with glob characters is a glob, anything else a case-insensitive substring of the path. */
 export function pathMatcher(pattern: string): (rel: string) => boolean {
-  if (/[*?[{]/.test(pattern)) {
+  // `[` is not a glob character here: a route segment like [id] is a plain piece of a path (a bracket class needs a * or ? to be a glob anyway)
+  if (/[*?{]/.test(pattern)) {
     const re = workspaceGlob(pattern);
     return (rel) => re.test(rel);
   }
@@ -172,7 +173,7 @@ export const findFilesTool: RegisteredTool = {
       const rel = relativeTo(ctx.root, file);
       if (isSecretPath(file) || !match(rel)) continue;
       found.push(rel);
-      if (found.length >= MAX_GREP_MATCHES) return found.join("\n") + `\n[stopped at ${MAX_GREP_MATCHES} files]`;
+      if (found.length >= MAX_GREP_MATCHES) return truncate(found.join("\n") + `\n[stopped at ${MAX_GREP_MATCHES} files]`);
     }
     return found.length ? truncate(found.join("\n")) : "no files found";
   },

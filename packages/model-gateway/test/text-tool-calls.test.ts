@@ -67,6 +67,15 @@ describe("mayBeTextToolCall", () => {
     expect(mayBeTextToolCall("")).toBeUndefined();
     expect(mayBeTextToolCall("   ")).toBeUndefined();
     expect(mayBeTextToolCall("<tool")).toBeUndefined();
+    // Prose that merely starts with a bracket is released at once, not held for the whole reply.
+    expect(mayBeTextToolCall("[1] The fix is to rename it")).toBe(false);
+    expect(mayBeTextToolCall("{ not json at all")).toBe(false);
+    expect(mayBeTextToolCall("[x] done")).toBe(false);
+    expect(mayBeTextToolCall("{")).toBeUndefined(); // too early to tell
+    expect(mayBeTextToolCall("[  ")).toBeUndefined();
+    expect(mayBeTextToolCall('{"')).toBe(true);
+    expect(mayBeTextToolCall("[ {")).toBe(true);
+    expect(mayBeTextToolCall("[]")).toBe(true);
     expect(mayBeTextToolCall("``")).toBeUndefined();
   });
 });

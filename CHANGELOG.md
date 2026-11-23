@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+### Fixes from a code review of the recent changes
+A review of the TypeScript changes (gateway, text tool calls, find_files; the Rust and desktop-lib changes were not covered) found five things; four were real and are fixed:
+- **`find_files "[id]"` found nothing.** A pattern with `[` was treated as a glob, so a Next.js route segment like `[id]` matched no path. A bracket is now a plain character (a glob needs `*`, `?` or `{`), in both the Rust index and the fallback.
+- **Cached OpenAI-compatible tokens were billed at the full rate.** They were reported but priced as fresh input, so cost and Max $ ran high. They are now priced at the cache rate (set per model in Settings > Model prices).
+- **A reply starting with `[` or `{` was held back until it finished** (in case it was a tool call written as text), so "[1] The fix is..." appeared all at once at the end. Text is now released as soon as it cannot be JSON (`{` must be followed by `"` or `}`, `[` by `{` or `]`).
+- `find_files` skipped the output cap on its early return.
+- **Not a bug, left alone:** the review flagged the cache-read rates for Sonnet 5.5, Opus 5.5 (0.05x) and Fable 5.2 (0.025x) as too low against Haiku's 0.1x. They come from Anthropic's published table (read 2026-11-23), where those models differ; the source is cited in the code.
+- Tests for each fix; 586 unit tests and 56 end-to-end tests pass.
+
 ### A race in the Context pane (and the rules-panel test that failed now and then)
 - **Fixed a real latent bug:** the Context pane (rules for the active file, memory search, skills, docs, plans, checkpoints, saved prompts) loaded its list in an effect with no ordering guard, so when loads overlapped the one that **finished** last won, not the one that **started** last. Switching file quickly could leave the rules of the previous file on screen, and typing "ab" in the memory search could end up showing the results for "a". Each of those effects now goes through `latestOnly`, where only the most recent load may apply its result and unmount drops whatever is in flight. Seven unit tests force the out-of-order completion by hand (a slow older load finishing after a newer one, a scrambled burst of six, cancellation, failures).
 - **What is not established:** this race fits the intermittent rules-panel end-to-end failure (stale result = root rules only, no nested `server/AGENTS.md`), but I could not make it happen. Tauri's `invoke` is read-only, so a read cannot be slowed from a test, and 75 rounds of rapid tab switching (over 1,800 overlapping loads) on the unfixed code never produced a stale list. `rules-race.spec.ts` keeps that stress as a guard; it passed before and after the fix, so it does not prove the fix. The test did fail in several full runs shortly after the Claude-plan change and not in the many since (the status is cached, the header no longer shifts), so the earlier failures may equally have come from that; the cause is still unproven.

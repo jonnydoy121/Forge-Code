@@ -57,6 +57,16 @@ describe("the gateway applies custom prices", () => {
     expect(cost(await ask())).toBe(0);
   });
 
+  it("discounts cached prompt tokens on an OpenAI-compatible provider at the cache rate, not the full input rate", async () => {
+    const stream = sse({ choices: [{ delta: { content: "x" } }] }, { choices: [], usage: { prompt_tokens: 3000, completion_tokens: 100, prompt_tokens_details: { cached_tokens: 2000 } } });
+    const gw = new Gateway({ fetch: (async () => response(stream)) as FetchLike });
+    gw.register("o", { kind: "openai", baseUrl: "https://api.example.com/v1", apiKey: "k" });
+    gw.setPrices({ "gpt-4o": { input: 2.5, output: 10, cacheRead: 0.5 } });
+    const events = await collect(gw.stream({ provider: "o", model: "gpt-4o", messages: [{ role: "user", content: "hi" }] }));
+    expect(cost(events)).toBeCloseTo((1000 * 2.5 + 2000 * 2.5 * 0.5 + 100 * 10) / 1e6, 10); // 1,000 fresh + 2,000 cached, not 3,000 fresh
+    expect((events.at(-1) as Extract<StreamEvent, { type: "done" }>).usage.inputTokens).toBe(3000); // the whole prompt is still what is reported
+  });
+
   it("applies to Anthropic models the built-in table lacks, including cache reads", async () => {
     const stream = sse({ type: "message_start", message: { usage: { input_tokens: 100, cache_read_input_tokens: 1000 } } }, { type: "message_delta", usage: { output_tokens: 10 } });
     const gw = new Gateway({ fetch: (async () => response(stream)) as FetchLike });

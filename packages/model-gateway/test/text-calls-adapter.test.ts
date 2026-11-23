@@ -60,6 +60,12 @@ describe("tool calls a local model wrote as text", () => {
     expect(texts(await run(text("I will read it: ", json))).join("")).toBe(`I will read it: ${json}`);
   });
 
+  it("do not delay an answer that merely starts with a bracket: it streams as it arrives too", async () => {
+    const events = await run(text("[1] The fix ", "is to rename ", "the function."));
+    expect(texts(events)).toEqual(["[1] The fix ", "is to rename ", "the function."]);
+    expect(calls(events)).toEqual([]);
+  });
+
   it("do not delay ordinary answers: prose streams piece by piece as it arrives", async () => {
     const events = await run(text("The function ", "returns ", "x * 2."));
     expect(texts(events)).toEqual(["The function ", "returns ", "x * 2."]);

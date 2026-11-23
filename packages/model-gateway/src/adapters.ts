@@ -269,7 +269,7 @@ export function openAiCompatibleAdapter(cfg: AdapterConfig, opts: { free?: boole
       for (const [, c] of [...calls.entries()].sort((a, b) => a[0] - b[0])) {
         yield { type: "tool_call", call: { id: c.id || `call_${c.name}`, name: c.name, args: safeJson(c.args) } };
       }
-      yield { type: "done", usage: { inputTokens: input, outputTokens: output, costUsd: opts.free ? 0 : costFor(req.model, input, output, cfg.prices), ...(cached > 0 ? { cacheReadTokens: cached } : {}) } };
+      yield { type: "done", usage: { inputTokens: input, outputTokens: output, costUsd: opts.free ? 0 : usageCost(req.model, { input: Math.max(0, input - cached), output, cacheRead: cached }, cfg.prices), ...(cached > 0 ? { cacheReadTokens: cached } : {}) } };
     },
   };
 }

@@ -10,6 +10,8 @@ beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "forge-th-")).replace(/\\/g, "/");
   mkdirSync(join(root, "src"));
   mkdirSync(join(root, "node_modules/x"), { recursive: true });
+  mkdirSync(join(root, "src/[id]"), { recursive: true });
+  writeFileSync(join(root, "src/[id]/page.ts"), "export default 1;\n");
   writeFileSync(join(root, "src/a.ts"), "export const a = 1;\nexport function hello() {}\n");
   writeFileSync(join(root, "src/b.py"), "def hello():\n  pass\n");
   writeFileSync(join(root, ".env"), "TOKEN=supersecretvalue123\n");
@@ -77,8 +79,13 @@ describe("find_files", () => {
     expect((await call("find_files", { pattern: "*.py" })).output).toBe("src/b.py");
     expect((await call("find_files", { pattern: "src/*.ts" })).output).toBe("src/a.ts");
     expect((await call("find_files", { pattern: "B.P" })).output).toBe("src/b.py");
-    expect((await call("find_files", { pattern: "*.{ts,py}" })).output.split("\n").sort()).toEqual(["src/a.ts", "src/b.py"]);
+    expect((await call("find_files", { pattern: "*.{ts,py}" })).output.split("\n").sort()).toEqual(["src/[id]/page.ts", "src/a.ts", "src/b.py"]);
     for (const hidden of ["env", "node_modules", "i.js"]) expect((await call("find_files", { pattern: hidden })).output, hidden).toBe("no files found");
+  });
+  it("treats a bracket as a plain character: a route segment like [id] is found by its name", async () => {
+    expect((await call("find_files", { pattern: "[id]" })).output).toBe("src/[id]/page.ts");
+    expect((await call("find_files", { pattern: "[ID]/PAGE" })).output).toBe("src/[id]/page.ts");
+    expect((await call("find_files", { pattern: "[nothing]" })).output).toBe("no files found");
   });
   it("is a read tool: available in ask mode, and a missing pattern is a tool error", async () => {
     expect(host().listTools("ask").map((t) => t.name)).toContain("find_files");

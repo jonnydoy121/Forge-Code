@@ -9,7 +9,12 @@ import type { ToolCall } from "@forge/protocol";
 export function mayBeTextToolCall(soFar: string): boolean | undefined {
   const t = soFar.trimStart();
   if (!t) return undefined;
-  if (t[0] === "{" || t[0] === "[") return true;
+  // JSON begins {" (or {}) and [{ (or []): anything else after the bracket ("[1] The fix is...") is ordinary text, shown at once.
+  if (t[0] === "{" || t[0] === "[") {
+    const next = t.slice(1).trimStart()[0];
+    if (next === undefined) return undefined;
+    return t[0] === "{" ? next === '"' || next === "}" : next === "{" || next === "]";
+  }
   for (const marker of ["<tool_call>", "```"]) {
     if (t.startsWith(marker)) return true;
     if (marker.startsWith(t)) return undefined; // a prefix of the marker so far: wait for more
