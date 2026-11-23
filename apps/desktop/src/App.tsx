@@ -399,7 +399,7 @@ export function App() {
                 <>
                   <input
                     autoFocus
-                    className="min-w-0 flex-1 rounded bg-neutral-900 px-2 py-0.5"
+                    className="min-w-0 flex-1 rounded bg-[var(--hover)] px-2 py-0.5"
                     data-testid="inline-instruction"
                     aria-label="Describe the change"
                     placeholder="Describe the change, then Enter (Esc to cancel)"

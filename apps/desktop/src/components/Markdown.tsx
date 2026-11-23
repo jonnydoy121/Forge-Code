@@ -36,7 +36,7 @@ function CodeBlock({ lang, text, closed }: { lang: string; text: string; closed:
     });
   };
   return (
-    <div className="overflow-hidden rounded border border-[var(--border)] bg-black/30" data-testid="code-block">
+    <div className="overflow-hidden rounded border border-[var(--border)] bg-[var(--panel)]" data-testid="code-block">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">
         <span>{lang || "code"}</span>
         {closed && (

@@ -104,6 +104,13 @@ test("capture the main screens", async () => {
     await shot("15-light-terminal");
     await page.keyboard.press("Control+`");
 
+    // Inline edit box (the file must be unmodified).
+    await page.locator(".monaco-editor .view-lines").click();
+    await page.keyboard.press("Alt+I");
+    await expect(page.getByTestId("inline-edit")).toBeVisible();
+    await shot("19-light-inline-edit");
+    await page.keyboard.press("Escape");
+
     // Tabs (one open file edited, so a dirty marker shows), the permission prompt and the welcome dialog, in light.
     await page.getByTestId("tree-index.ts").click();
     await page.getByRole("tab", { name: /math\.ts/ }).click().catch(() => page.getByText("math.ts", { exact: true }).first().click());
@@ -124,6 +131,12 @@ test("capture the main screens", async () => {
     await expect(page.getByTestId("welcome-skip")).toBeVisible();
     await shot("18-light-welcome");
     await page.getByTestId("welcome-skip").click();
+
+    await page.getByTestId("timeline-toggle").click();
+    await shot("20-light-checkpoints");
+    await page.getByRole("button", { name: "Audit", exact: true }).click();
+    await shot("21-light-audit");
+    await page.getByRole("button", { name: "Audit", exact: true }).click();
 
     await page.getByTestId("thread-new").click();
     await shot("08-second-thread");

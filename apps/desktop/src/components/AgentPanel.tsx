@@ -549,7 +549,7 @@ ${diff}`);
               <>
                 <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-2 py-1 text-xs">
                   {(["all", "network", "command", "file", "blocked"] as const).map((f) => (
-                    <button key={f} data-testid={`audit-${f}`} className={auditFilter === f ? "underline" : "text-[var(--muted)]"} onClick={() => setAuditFilter(f)}>{f}</button>
+                    <button key={f} data-testid={`audit-${f}`} aria-pressed={auditFilter === f} className={`rounded border px-2 py-0.5 ${auditFilter === f ? "border-[var(--border)] bg-[var(--hover)] font-semibold" : "border-transparent text-[var(--muted)] hover:bg-[var(--hover)]"}`} onClick={() => setAuditFilter(f)}>{f}</button>
                   ))}
                   <span className="ml-auto" data-testid="privacy-summary">
                     {net ? `${net.all.length} network request${net.all.length === 1 ? "" : "s"}, ${net.remote.length} left this machine, ${net.blocked.length} blocked` : ""}

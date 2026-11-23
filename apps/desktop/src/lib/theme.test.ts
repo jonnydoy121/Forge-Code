@@ -58,3 +58,13 @@ describe("dark theme contrast", () => {
     expect(contrast(dark["muted"]!, dark["hover"]!)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+describe("components use theme variables, not fixed dark backgrounds", () => {
+  it("no component hard-codes a neutral/gray background (it would be unreadable in the other theme)", async () => {
+    const { readdirSync } = await import("node:fs");
+    const base = fileURLToPath(new URL("..", import.meta.url));
+    const files = (readdirSync(base, { recursive: true }) as string[]).filter((f) => f.endsWith(".tsx")).map((f) => base + "/" + f);
+    const offenders = files.flatMap((f) => readFileSync(f, "utf8").split("\n").map((line, i) => ({ f, i: i + 1, line })).filter(({ line }) => /\bbg-(neutral|zinc|gray|slate|stone)-\d+/.test(line)).map(({ f: file, i }) => `${file.slice(base.length + 1)}:${i}`));
+    expect(offenders).toEqual([]);
+  });
+});
