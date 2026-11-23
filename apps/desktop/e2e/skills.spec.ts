@@ -151,3 +151,35 @@ test("a typed script rejects wrong arguments from the model, and nothing runs", 
     srv.close();
   }
 });
+
+// Automatic skills: a request that clearly matches a skill gets its instructions up front; the setting turns that off.
+for (const on of [true, false]) {
+  test(`a matching request ${on ? "gets" : "does not get"} the skill's instructions up front (setting ${on ? "on" : "off"})`, async () => {
+    const dir = skillWorkspace();
+    const { srv, bodies, port } = await modelServer();
+    try {
+      const page = await openWorkspace(dir);
+      await page.getByTestId("settings-toggle").click();
+      await page.getByTestId("base-url").fill(`http://127.0.0.1:${port}/v1`);
+      await page.getByTestId("sandbox-on").uncheck();
+      if (!on) await page.getByTestId("auto-skills").uncheck();
+      else await expect(page.getByTestId("auto-skills")).toBeChecked(); // on by default
+      await page.getByTestId("settings-toggle").click();
+      await page.locator('[data-testid="mode-select"]:visible').selectOption("agent");
+      await page.locator('[data-testid="agent-input"]:visible').fill("write a greeting file for the world");
+      await page.locator('[data-testid="agent-input"]:visible').press("Enter");
+      await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+      await page.getByTestId("deny").click();
+      await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+      if (on) {
+        expect(bodies[0]).toContain('House rules from \\"greet\\"');
+        expect(bodies[0]).toContain("Run greet.js with a name."); // the skill's own instructions, not just its index line
+      } else {
+        expect(bodies[0]).not.toContain("House rules from");
+        expect(bodies[0]).toContain("greet: Write a greeting file"); // the index is still there to load from
+      }
+    } finally {
+      srv.close();
+    }
+  });
+}

@@ -10,7 +10,7 @@ import { InMemoryCheckpointStore } from "@forge/checkpoints";
 import type { ModelGateway } from "@forge/protocol";
 import { diskFs, promptFs, toolFs } from "./nodefs";
 import { headlessCommandTools } from "./commands";
-import { RuleEngine, createSkillTools, expandPrompt, loadAgents, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
+import { RuleEngine, createSkillTools, matchSkills, renderMatchedSkills, expandPrompt, loadAgents, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
 import { unifiedDiff } from "./format";
 
 export interface Io {
@@ -27,6 +27,8 @@ export interface Options {
   prompt: string;
   provider: ProviderConfig["kind"];
   preset?: string;
+  /** do not apply matching skills automatically (they stay available through use_skill) */
+  noAutoSkills?: boolean;
   model: string | undefined;
   baseUrl: string | undefined;
   apply: boolean;
@@ -48,6 +50,7 @@ Usage:
 
 Options:
   --model <name>        model to use (or FORGE_MODEL)
+  --no-auto-skills      do not apply matching skills automatically (they stay available through use_skill)
   --provider <kind>     ollama (default), openai, anthropic, or a preset: gemini, openrouter, groq, lmstudio (or FORGE_PROVIDER)
   --base-url <url>      API base URL (or FORGE_BASE_URL)
   --allow <command>     let the agent run this command (repeatable; a trailing * allows any arguments but never
@@ -112,6 +115,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
       if (a === "-h" || a === "--help") return { help: true };
       else if (a === "--apply") o.apply = true;
       else if (a === "--json") o.json = true;
+      else if (a === "--no-auto-skills") o.noAutoSkills = true;
       else if (a === "--allow") o.allow.push(value());
       else if (a === "--model") o.model = value();
       else if (a === "--base-url") o.baseUrl = value();
@@ -186,6 +190,10 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
   const skillTools = skills.length ? createSkillTools({ root, fs: skillFs, skills: () => loadSkills(skillFs, `${root}/.forge/skills`, userSkills) }) : [];
   // The repo's rules (AGENTS.md, .forgerules, CLAUDE.md, .cursorrules, .forge/rules): a headless run follows them like the app does.
   // Without an open file, the rules that always apply are the ones that count (scoped ones need a file to match against).
+  // Skills that clearly cover this task are put in front of the model now; the rest stay in the index for it to load itself.
+  const matched = o.noAutoSkills ? [] : matchSkills(o.prompt, skills);
+  if (matched.length && !o.json) io.err(`  applying skill${matched.length > 1 ? "s" : ""}: ${matched.map((m) => m.skill.name).join(", ")}
+`);
   const rulesText = RuleEngine.render(await new RuleEngine(skillFs, root).applicable([]));
   // Specialists (.forge/agents): the coordinator can hand a read-only investigation to one with its own instructions and tools.
   // The CLI has no model tiers, so a specialist's `tier` is ignored here and it uses the same model.
@@ -201,9 +209,10 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
   const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...skillTools, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : []), delegate] : [...READ_TOOLS, ...skillTools, delegate] });
   const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 },
     sections:
-      rulesText || skills.length
+      rulesText || skills.length || matched.length
         ? () => [
             ...(rulesText ? [{ id: "rules", label: "Project rules", priority: 0, text: rulesText }] : []),
+            ...(matched.length ? [{ id: "skills-applied", label: "House rules for this request: follow them in your reply. They are instructions to apply, not tools to call", priority: 1, text: renderMatchedSkills(matched) }] : []),
             ...(skills.length ? [{ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) }] : []),
           ]
         : undefined,

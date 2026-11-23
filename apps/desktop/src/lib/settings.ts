@@ -53,6 +53,8 @@ export interface AgentSettings {
   triage: "off" | "heuristic" | "model";
   /** let the scout take simple requests that need edits, not just questions (needs a model that is good at tool calls) */
   scoutEdits: boolean;
+  /** put the instructions of skills that clearly cover the request in front of the model, instead of waiting for it to load them */
+  autoSkills: boolean;
   /** prices for models the built-in table lacks, one per line: `model input-$ output-$` per million tokens */
   customPrices: string;
 }
@@ -110,6 +112,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   escalateAfter: 2,
   triage: "off",
   scoutEdits: false,
+  autoSkills: true,
   customPrices: "",
 };
 

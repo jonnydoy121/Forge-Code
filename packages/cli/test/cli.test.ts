@@ -268,3 +268,34 @@ describe("specialists in the CLI", () => {
     expect(JSON.stringify(gw.requests[1]!.messages)).toContain("ghost");
   });
 });
+
+describe("automatic skills in the CLI", () => {
+  const withSkill = () => {
+    const dir = project();
+    mkdirSync(`${dir}/.forge/skills/git-commit-style`, { recursive: true });
+    writeFileSync(`${dir}/.forge/skills/git-commit-style/SKILL.md`, "---\ndescription: Write commit messages and pull request descriptions in the team convention\n---\nEnd every message with Refs: FRG-<n>.\n");
+    return dir;
+  };
+  const systemText = (gw: ScriptedGateway) => JSON.stringify(gw.requests[0]!.messages);
+
+  it("puts a matching skill's instructions in front of the model, and says so", async () => {
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    const t = io(withSkill(), gw);
+    expect(await runCli(["ask", "Write the commit message and pull request description for this change", "--model", "m"], t.i)).toBe(0);
+    expect(systemText(gw)).toContain("End every message with Refs: FRG-<n>.");
+    expect(t.err()).toContain("applying skill: git-commit-style");
+  });
+
+  it("applies nothing for an unrelated request, and nothing with --no-auto-skills (the index stays)", async () => {
+    const unrelated = new ScriptedGateway([[text("ok"), done]]);
+    await runCli(["ask", "explain what a closure is", "--model", "m"], io(withSkill(), unrelated).i);
+    expect(systemText(unrelated)).not.toContain("Refs: FRG-");
+
+    const off = new ScriptedGateway([[text("ok"), done]]);
+    const t = io(withSkill(), off);
+    await runCli(["ask", "Write the commit message and pull request description for this change", "--no-auto-skills", "--model", "m"], t.i);
+    expect(systemText(off)).not.toContain("Refs: FRG-");
+    expect(systemText(off)).toContain("git-commit-style"); // still listed so the model can load it
+    expect(t.err()).not.toContain("applying skill");
+  });
+});

@@ -6,7 +6,7 @@ import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { createSession } from "../lib/agentSession";
 import { fsApi, indexBackend } from "../lib/ipc";
 import { attachmentKey, attachmentLabel, resolveAttachment, type Attachment } from "../lib/attachments";
-import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord, type SavedPrompt, expandPrompt, matchPrompts, skillsIndex } from "@forge/context-store";
+import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNewThread, stringifyFrontmatter, type Correction, type SessionRecord, type SavedPrompt, expandPrompt, matchPrompts, matchSkills, renderMatchedSkills, skillsIndex } from "@forge/context-store";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
@@ -422,6 +422,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             }
             try {
               const skills = await services.skills();
+              const matched = settings.autoSkills ? matchSkills(promptRef.current, skills) : [];
+              if (matched.length) out.push({ id: "skills-applied", label: "House rules for this request: follow them in your reply. They are instructions to apply, not tools to call", priority: 1, text: renderMatchedSkills(matched) });
               if (skills.length) out.push({ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) });
             } catch {
               /* no skills folder */
@@ -653,6 +655,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               <option value="model">Ask the scout first (one extra call)</option>
             </select>
           </Row>
+          <Check testId="auto-skills" checked={settings.autoSkills} onChange={(v) => update({ autoSkills: v })}>Apply skills automatically when the request clearly matches one (their instructions go in front of the model; the rest stay available to load)</Check>
           <Check testId="scout-edits" checked={settings.scoutEdits} onChange={(v) => update({ scoutEdits: v })}>Let the scout make small edits too, not only answer questions (only for a model that is good at tool calls: a 1.5B model passed 4 of 18 small edits, a 7B model 13 of 18)</Check>
           {settings.localOnly && (tierIsRemote(settings, "scout") || tierIsRemote(settings, "architect")) && <p className="text-amber-400" data-testid="routing-local-only-note">Local-only mode is on, so a remote scout or architect is skipped and the main model is used.</p>}
 

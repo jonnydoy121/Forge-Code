@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Skills applied automatically (researched and measured)
+- A request that clearly matches a skill (two or more distinct words in its name and description, rarity-weighted, at most two skills) now gets that skill's instructions up front, in the CLI and the app, instead of relying on the model to call `use_skill`. `--no-auto-skills` and a Settings checkbox turn it off.
+- Measured on a local 7B model (60 runs per condition): conventions followed 0 of 60 with no skills, 3 to 5 of 60 with the skills only listed, 31 to 32 of 60 applied automatically; nothing applied on unrelated requests. Offline matching: 95% precision, 91% recall on 36 labelled requests written by the author. One model, artificial conventions, string-match scoring: see `docs/AUTO-SKILLS.md` for the limits.
+- No automatic persona switching: the research found no reliable gain (and a random-level automatic choice). Specialists stay explicit.
+- Dropped a first-version rule that let one word from a skill's name count alone (87% precision, "release the lock" applied the release skill).
+
 ### Agent features list: rules, specialists, schedules, presets, serve
 - **`.forgerules`** is read as a rules file (app and CLI); the CLI now loads rules too, and tolerates missing rule folders.
 - **Specialist agents** (`.forge/agents/*.md`, read-only tools, own model tier) used through `delegate`; Agents tab in the Context pane.
