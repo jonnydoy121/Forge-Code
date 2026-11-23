@@ -81,6 +81,25 @@ matches after a restart. Timings on this machine drift by up to about 30% with b
 ### Smaller fixes
 - The UI polled localStorage every second, forever, to notice a settings change. It now listens for a change event.
 
+### One agent process for every thread
+Each agent thread used to start its own `forge-runtime` process. They now share one: every line on the wire carries a session id,
+the process creates a runtime per id, and it is started on demand and released when the last thread closes.
+
+| | Before | After |
+|---|---|---|
+| Memory, 3 threads | 97 MB (3 processes) | 33 MB (1 process), -66% |
+| Processes, 2 threads running | 2 | 1 |
+
+Sharing a process meant its failure modes had to be handled, and tests (against real child processes and the real window)
+cover each: sessions stay isolated and a slow one does not hold up a fast one; closing one thread aborts only its own in-flight
+work; if the process crashes every pending run fails at once instead of hanging, and the next message starts a fresh process
+and carries the conversation over; the process is released after the last thread closes.
+
+Two real bugs surfaced on the way and are fixed: closing a thread did not cancel its in-flight model request (the host kept
+streaming, and spending tokens, after the thread was gone), and a page reload orphaned every child process (the agent runtime,
+MCP and ACP servers, background commands) until the app exited, because the JavaScript that tracked them was discarded. Child
+processes are now stopped when the page starts loading.
+
 ## Tried, measured, and removed (so nobody repeats them)
 - **Parallel directory walk** (`ignore`'s parallel walker) for the warm index build: no measurable gain (707 ms vs 765 ms,
   noise). On this machine the warm build is not bound by the walk. Reverted to keep the code simple.
@@ -101,4 +120,3 @@ matches after a restart. Timings on this machine drift by up to about 30% with b
 ## Ideas not done (with the reason)
 - **Trim Monaco to the features and languages Forge-Code uses.** Could shrink the 3.3 MB engine and its memory, but needs a
   careful feature audit to avoid regressions; no measurement yet says what is safe to drop.
-- **Share one agent-runtime process across threads.** Saves about 33 MB per extra thread; adds multiplexing complexity.

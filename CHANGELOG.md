@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### One agent process for every thread
+- All agent threads now share a single `forge-runtime` process instead of one each: memory for three threads 97 -> 33 MB (-66%). A session id on every line (`{"s": id, "m": message}`, `{"s": id, "end": true}`), a runtime per id inside the process, started on demand and released when the last thread closes. Failure modes handled and tested against real processes: isolation between sessions, closing one aborts only its own work, a crashed process fails every pending run immediately (it used to hang) and the next message starts a fresh process with the conversation carried over.
+- Fixed two real bugs found along the way: closing a thread did not cancel its in-flight model request (the host kept streaming and spending tokens), and a page reload orphaned the agent runtime, MCP/ACP servers and background commands until the app exited (they are now stopped when the page starts loading).
+
 ### Warm open of huge repos
 - Profiled with new per-phase build timings (`BuildStats.phases`). Reopening a 120,000-file index 999 -> 662 ms (rows decoded on every core in bounded chunks, maps pre-sized); a warm build with nothing changed 809 -> 225 ms (the Merkle tree is no longer rebuilt and diffed when the file set and hashes are provably unchanged; the root is computed on demand); the import graph (about 410 ms) is built after "ready" instead of inside the build. Total until ready 1,808 -> 887 ms (-51%). Tests cover unchanged / added / edited / deleted / restart, including the Merkle root. Rejected after measuring: SQLite memory-mapped reads (faster, but a crash risk if the index file is truncated). Also removed three long-standing compiler warnings.
 

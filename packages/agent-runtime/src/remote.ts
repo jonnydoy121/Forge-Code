@@ -13,6 +13,8 @@ export interface Port {
   onmessage: ((e: { data: unknown }) => void) | null;
   start?(): void;
   close?(): void;
+  /** Called by a transport when the other side died (a process exited), so pending work can fail instead of hanging. */
+  onclose?: (() => void) | null;
 }
 
 /** What the UI needs from an agent loop, whether it runs in-process (`Runtime`) or in a worker (`RuntimeClient`). */
@@ -31,6 +33,8 @@ export interface AgentRuntime {
   transport?: string;
   /** Release the worker or process. */
   terminate?(): void;
+  /** True when the worker or process behind it died; the UI should create a fresh session. */
+  readonly isDead?: boolean;
 }
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
@@ -92,8 +96,8 @@ type HostMethod = "tools.call" | "gate.check" | "sections" | "verify.run" | "hoo
 
 // ============================== worker side ==============================
 
-/** Run inside the worker: `serveRuntime(self)`. */
-export function serveRuntime(port: Port) {
+/** Run inside the worker: `serveRuntime(self)`. Returns a function that aborts the session's work and drops its state. */
+export function serveRuntime(port: Port): () => void {
   let runtime: Runtime | null = null;
   let nextCid = 1;
   let nextSid = 1;
@@ -236,6 +240,13 @@ export function serveRuntime(port: Port) {
     }
   };
   port.start?.();
+  return () => {
+    for (const ac of runs.values()) ac.abort();
+    runs.clear();
+    streams.clear();
+    calls.clear();
+    runtime = null;
+  };
 }
 
 // ============================== host (main thread) side ==============================
@@ -264,12 +275,19 @@ export class RuntimeClient implements AgentRuntime {
   private runs = new Map<number, { push: (x: { ev?: AgentEvent; end?: RuntimeSnapshot; error?: Error }) => void }>();
   private sessionStarts = new Map<number, (v: AgentEvent | null) => void>();
   private streamAborts = new Map<number, AbortController>();
+  private rejectReady!: (e: Error) => void;
+  private deadReason: Error | null = null;
   readonly ready: Promise<void>;
 
   constructor(private port: Port, private deps: RemoteHostDeps, config: RuntimeConfig) {
     let resolveReady!: () => void;
-    this.ready = new Promise<void>((r) => (resolveReady = r));
+    this.ready = new Promise<void>((res, rej) => {
+      resolveReady = res;
+      this.rejectReady = rej;
+    });
+    this.ready.catch(() => {}); // surfaced through run() and sessionStart(); not an unhandled rejection
     port.onmessage = (e) => void this.onMessage(e.data as ToHost, resolveReady);
+    port.onclose = () => this.fail(new Error("The agent process exited unexpectedly."));
     port.start?.();
     const toolSpecs = Object.fromEntries(MODES.map((m) => [m, deps.tools.listTools(m)])) as Record<Mode, ToolSpec[]>;
     const modePrompts = Object.fromEntries(MODES.map((m) => [m, deps.modePrompt?.(m)])) as Record<Mode, string | undefined>;
@@ -286,7 +304,23 @@ export class RuntimeClient implements AgentRuntime {
     port.postMessage(init);
   }
 
+  /** True once the process or worker behind this client is gone: it cannot be used again, make a new one. */
+  get isDead(): boolean {
+    return this.deadReason !== null;
+  }
+
+  private fail(err: Error) {
+    if (this.deadReason) return;
+    this.deadReason = err;
+    this.rejectReady(err);
+    for (const r of this.runs.values()) r.push({ error: err });
+    for (const resolve of this.sessionStarts.values()) resolve(null);
+    this.sessionStarts.clear();
+    this.running = false;
+  }
+
   private post(m: ToWorker) {
+    if (this.deadReason) return;
     this.port.postMessage(m);
   }
 
@@ -415,6 +449,11 @@ export class RuntimeClient implements AgentRuntime {
   }
 
   terminate() {
+    this.deadReason ??= new Error("This agent session was closed.");
+    // Cancel what the host is doing for this session (model requests cost tokens). The process may tell us to stop too,
+    // but once the port is closed that message has nowhere to go, so do not depend on it.
+    for (const ac of this.streamAborts.values()) ac.abort();
+    this.streamAborts.clear();
     this.port.close?.();
   }
 }

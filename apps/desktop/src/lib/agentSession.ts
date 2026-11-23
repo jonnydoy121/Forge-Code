@@ -4,11 +4,11 @@ import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
 import { modePrompt } from "@forge/plans";
 import { RuntimeClient, type AgentRuntime } from "@forge/agent-runtime/src/remote";
-import { linePort } from "@forge/agent-runtime/src/stdio";
+import { openRuntimePort } from "./runtimeProcess";
 import { invoke } from "@tauri-apps/api/core";
 import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
-import { launchLineProcess, type WorkspaceServices } from "./workspace";
+import type { WorkspaceServices } from "./workspace";
 
 export const tauriFs: FsBackend = {
   readFile: fsApi.readFile,
@@ -27,14 +27,11 @@ function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
 }
 
 /** The agent loop's transport: its own OS process when the bundled runtime is available, otherwise a Web Worker. */
-async function openPort(cwd: string | undefined, preferProcess: boolean) {
+async function openPort(preferProcess: boolean) {
   if (preferProcess) {
     try {
       const exe = await invoke<string | null>("runtime_sidecar_path");
-      if (exe) {
-        const t = await launchLineProcess(exe, [], cwd, {});
-        return { port: linePort((l) => t.send(l), (on) => t.onLine(on), () => t.close()), kind: "process" as const };
-      }
+      if (exe) return { port: await openRuntimePort(exe), kind: "process" as const };
     } catch {
       /* fall through to the worker */
     }
@@ -87,7 +84,7 @@ export async function createSession(opts: {
   const auditEntry = audit("tool");
   // The agent loop runs outside the UI thread (its own OS process, or a Web Worker as the fallback). Everything that
   // needs Tauri IPC (files, HTTP, permissions, indexing) stays here and is served to it over messages.
-  const transport = typeof Worker !== "undefined" ? await openPort(opts.isolated ? undefined : services.root, settings.runtimeProcess) /* an isolated thread must not hold its worktree as a process cwd: Windows cannot delete a directory that is in use */ : null;
+  const transport = typeof Worker !== "undefined" ? await openPort(settings.runtimeProcess) : null;
   const runtime: AgentRuntime =
     transport
       ? new RuntimeClient(

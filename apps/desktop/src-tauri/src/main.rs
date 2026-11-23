@@ -171,6 +171,15 @@ fn main() {
         .manage(indexer::IndexState::default())
         .manage(proc::ProcState::default())
         .manage(forge_core::bg::Background::default())
+        // A page reload throws away the JavaScript state that tracks child processes (the agent runtime, MCP and ACP servers,
+        // background commands). Stop them, or they would keep running unseen until the app exits.
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                use tauri::Manager;
+                webview.state::<proc::ProcState>().stop_all();
+                webview.state::<forge_core::bg::Background>().stop_all();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             list_dir,
             read_file,

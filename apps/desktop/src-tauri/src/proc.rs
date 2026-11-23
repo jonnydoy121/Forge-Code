@@ -110,6 +110,17 @@ pub fn proc_send(state: State<ProcState>, id: u32, line: String) -> Result<(), S
     e.stdin.write_all(line.as_bytes()).and_then(|_| e.stdin.write_all(b"\n")).and_then(|_| e.stdin.flush()).map_err(|e| e.to_string())
 }
 
+impl ProcState {
+    /// Stop every child process. After a page reload the JavaScript that knew their ids is gone, so nothing else could.
+    pub fn stop_all(&self) {
+        let all: Vec<Entry> = self.procs.lock().unwrap().drain().map(|(_, e)| e).collect();
+        for mut e in all {
+            kill_tree(e.child.id());
+            let _ = e.child.kill();
+        }
+    }
+}
+
 #[tauri::command]
 pub fn proc_stop(state: State<ProcState>, id: u32) {
     if let Some(mut e) = state.procs.lock().unwrap().remove(&id) {

@@ -1,4 +1,11 @@
 import { chromium, expect, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+
+/** How many agent-runtime processes are running right now (Windows). */
+export function runtimeProcesses(): number {
+  const out = execFileSync("tasklist", ["/FI", "IMAGENAME eq forge-runtime.exe", "/FO", "CSV", "/NH"], { encoding: "utf8" });
+  return out.split(/\r?\n/).filter((l) => l.includes("forge-runtime.exe")).length;
+}
 
 /**
  * Connect to the live Forge window and open `dir` as the workspace. The window persists across specs, and a

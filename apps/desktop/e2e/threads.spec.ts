@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openWorkspace } from "./helpers";
+import { openWorkspace, runtimeProcesses } from "./helpers";
 
 test.skip(!process.env.FORGE_CDP, "needs a running Forge window (FORGE_CDP)");
 
@@ -48,6 +48,7 @@ test("a slow thread does not block a second thread, and their conversations stay
     await input(page).press("Enter");
     await expect(lastAnswer(page)).toContainText("fast answer", { timeout: 15_000 });
     await expect(page.getByTestId("thread-tab-main").getByLabel("running")).toBeVisible(); // thread 1 is still busy
+    expect(runtimeProcesses(), "two threads, one shared agent process").toBe(1);
 
     // Back in thread 1 its own answer arrives; the conversations never mixed.
     await page.getByTestId("thread-tab-main").click();

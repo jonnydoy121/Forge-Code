@@ -206,7 +206,9 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "assistant", text: "" }]);
     let began = false;
     try {
-      if (!runtime.current) {
+      // If the process behind the last session died, start a fresh one and carry the conversation over.
+      const carried = runtime.current?.isDead ? runtime.current.history : null;
+      if (!runtime.current || runtime.current.isDead) {
         runtime.current = await createSession({
           isolated,
           root,
@@ -281,6 +283,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         });
       }
       const rt = runtime.current;
+      if (carried?.length) rt.setHistory(carried);
       setRuntimeKind(rt.transport ?? "");
       services.setRuntime(rt); // the runtime acting now: checkpoints record its history length
       services.runBegin();
