@@ -15,6 +15,20 @@
   --muted: #52525b;
   --border: #d4d4d8;
   --hover: #e4e4e7;
+  /* The components use palette colors chosen for a dark background (text-amber-400 and so on). On white those are too pale to
+     read, so the light theme remaps them: darker shades for text, pale tints where a translucent dark shade is the background. */
+  --color-red-200: #7f1d1d;
+  --color-red-300: #991b1b;
+  --color-red-400: #b91c1c;
+  --color-green-400: #15803d;
+  --color-amber-200: #78350f;
+  --color-amber-300: #92400e;
+  --color-amber-400: #b45309;
+  --color-blue-400: #1d4ed8;
+  --color-red-900: #fecaca;
+  --color-green-900: #bbf7d0;
+  --color-amber-900: #fde68a;
+  --color-blue-900: #bfdbfe;
 }
 html, body, #root { height: 100%; margin: 0; }
 body { font-family: system-ui, sans-serif; }

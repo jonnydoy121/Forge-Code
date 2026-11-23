@@ -488,7 +488,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           </Row>
           <Row label="Max steps"><input type="number" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.maxSteps} onChange={(e) => update({ maxSteps: Number(e.target.value) || 12 })} /><span className="text-[var(--muted)]">Max $</span><input type="number" step="0.5" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.maxCostUsd} onChange={(e) => update({ maxCostUsd: Number(e.target.value) || 2 })} /></Row>
           <Row label="Max minutes"><input type="number" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /><span className="text-[var(--muted)]">per run</span></Row>
-          <Row label="Context"><input type="number" data-testid="budget-tokens" className="w-24 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.budgetTokens} onChange={(e) => update({ budgetTokens: Number(e.target.value) || 100000 })} /><span className="text-[var(--muted)]">tokens, compact at</span><input type="number" step="0.05" min="0.3" max="0.95" className="w-14 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.compactionThreshold} onChange={(e) => update({ compactionThreshold: Number(e.target.value) || 0.8 })} /></Row>
+          <Row label="Context"><input type="number" data-testid="budget-tokens" className="w-24 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.budgetTokens} onChange={(e) => update({ budgetTokens: Number(e.target.value) || 100000 })} /><span className="text-[var(--muted)]">tokens</span></Row>
+          <Row label="Compact at"><input type="number" step="0.05" min="0.3" max="0.95" className="w-24 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.compactionThreshold} onChange={(e) => update({ compactionThreshold: Number(e.target.value) || 0.8 })} /><span className="text-[var(--muted)]">of the budget</span></Row>
 
           <SettingsHeading>Privacy and safety</SettingsHeading>
           <Check testId="local-only" checked={settings.localOnly} onChange={(v) => update({ localOnly: v })}>Local-only mode: block every request that would leave this machine</Check>
@@ -700,7 +701,7 @@ ${diff}`);
             }
           }}
         />
-        <div className="mt-1 flex items-center gap-3 text-xs text-[var(--muted)]">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)] [&>*]:whitespace-nowrap">
           <span data-testid="token-meter" title={breakdown}>{meter ? `${meter.total.toLocaleString()} tokens${meter.calibrated ? "" : " (est.)"}` : "0 tokens"}</span>
           <span data-testid="cost">${cost.toFixed(4)}</span>
           {runtimeKind && <span data-testid="runtime-kind" title="Where the agent loop runs">agent: {runtimeKind}</span>}

@@ -76,6 +76,22 @@ test("capture the main screens", async () => {
     await shot("07-context-skills");
     await page.keyboard.press("Control+Shift+K");
 
+    // The same screens in the light theme.
+    await page.keyboard.press("Control+Shift+P");
+    await page.keyboard.type("theme");
+    await page.keyboard.press("Enter");
+    await shot("09-light-editor");
+    await page.keyboard.press("Control+Shift+R");
+    await expect(page.getByTestId("hunk").first()).toBeVisible();
+    await shot("10-light-review");
+    await page.keyboard.press("Control+Shift+R");
+    await page.getByTestId("settings-toggle").click();
+    await shot("11-light-settings");
+    await page.getByTestId("settings-toggle").click();
+    await page.keyboard.press("Control+Shift+P");
+    await shot("12-light-palette");
+    await page.keyboard.press("Escape");
+
     await page.getByTestId("thread-new").click();
     await shot("08-second-thread");
   } finally {

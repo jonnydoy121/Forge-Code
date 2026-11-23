@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### UI: light theme, file tree
+- Light theme: status colors written for a dark background (amber/green/red text, the pending banner, the Unverified card, the status-bar count) were close to unreadable on white. The light theme now remaps them (darker text, pale tints), and a unit test computes WCAG contrast for every remapped color so it cannot regress (it fails on the old pale amber). The composer footer wraps instead of squeezing its labels; the Context setting is two aligned rows.
+- File tree: one Tab stop for the whole tree, arrow keys to move, Right/Left to expand, enter and collapse, Home/End, Enter to open (the ARIA tree pattern, tested in the real window); real chevrons; folder and file icons coloured by type.
+
 ### UI: settings, header, first run, status bar
 - Settings are grouped under headings (Model, Edits and limits, Privacy and safety, Assistance, Context), laid out as aligned label/control rows, and scroll inside the panel instead of pushing the conversation off screen.
 - Checkpoints, Audit and Settings are real buttons. Run checks and Detect commands moved from above the conversation to the composer footer.
