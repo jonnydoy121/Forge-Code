@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { latestOnly } from "../lib/latestOnly";
 import type { Checkpoint } from "@forge/protocol";
 import type { Hunk } from "@forge/review";
 import { git, type WorkspaceServices } from "../lib/workspace";
@@ -21,7 +22,9 @@ export function Timeline({ services, version, onRestoreConversation, onFilesChan
   const [branch, setBranch] = useState<string | null>(null);
 
   useEffect(() => {
-    void services.checkpoints.list().then((l) => setCps([...l].reverse()));
+    const load = latestOnly<Awaited<ReturnType<typeof services.checkpoints.list>>>((l) => setCps([...l].reverse()));
+    load.run(services.checkpoints.list());
+    return load.cancel;
   }, [services, version]);
 
   const run = async (label: string, fn: () => Promise<unknown>) => {

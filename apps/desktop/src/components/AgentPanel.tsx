@@ -16,6 +16,7 @@ import { prewarmRuntime } from "../lib/runtimeProcess";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { parsePrices } from "@forge/model-gateway";
 import { cleanCommitMessage } from "../lib/commitMessage";
+import { latestOnly } from "../lib/latestOnly";
 import { approvedPrompt, buildOptionsPrompt, optionLetter, parseOptions, type Option } from "../lib/options";
 import { tierIsRemote, tierSetting, tiersSendOffMachine, unpricedRemoteModels, type TierName } from "../lib/modelRouting";
 import { completeOnce } from "../lib/agentSession";
@@ -190,7 +191,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     bottom.current?.scrollIntoView?.({ block: "end" });
   }, [items]);
   useEffect(() => {
-    if (services) void services.prompts().then(setPrompts).catch(() => setPrompts([]));
+    if (!services) return;
+    const load = latestOnly(setPrompts);
+    load.runOr(services.prompts(), () => setPrompts([]));
+    return load.cancel;
   }, [services, version]);
   useEffect(() => {
     // New workspace: a new conversation. A settings change: a fresh session on the next send (it captures the model, tools and

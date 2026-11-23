@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CLAUDE_AGENT } from "../lib/claudePlan";
+import { latestOnly } from "../lib/latestOnly";
 import { RuleEngine, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
 import type { WorkspaceServices } from "../lib/workspace";
 
@@ -46,9 +47,16 @@ function RulesTab({ services, version, activeFile, onOpenFile }: Omit<Props, "on
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    // Loads can finish out of order; only the latest one may fill the list (an older, slower one must not overwrite it).
+    const rules = latestOnly(setApplied);
+    const lint = latestOnly(setWarnings);
     services.rules.invalidate();
-    void services.rules.applicable(activeFile ? [activeFile] : []).then(setApplied);
-    void services.lintAll().then(setWarnings).catch(() => setWarnings([]));
+    rules.run(services.rules.applicable(activeFile ? [activeFile] : []));
+    lint.runOr(services.lintAll(), () => setWarnings([]));
+    return () => {
+      rules.cancel();
+      lint.cancel();
+    };
   }, [services, version, activeFile]);
 
   return (
@@ -94,7 +102,9 @@ function RulesTab({ services, version, activeFile, onOpenFile }: Omit<Props, "on
 function SkillsTab({ services, version, onOpenFile }: { services: WorkspaceServices; version: number; onOpenFile: (path: string) => void }) {
   const [list, setList] = useState<Skill[] | null>(null);
   useEffect(() => {
-    void services.skills().then(setList).catch(() => setList([]));
+    const load = latestOnly(setList);
+    load.runOr(services.skills(), () => setList([]));
+    return load.cancel;
   }, [services, version]);
 
   return (
@@ -146,7 +156,9 @@ function MemoryTab({ services, version }: { services: WorkspaceServices; version
   const [draft, setDraft] = useState<{ name: string; body: string; scope: "project" | "user" } | null>(null);
 
   useEffect(() => {
-    void services.memories.search(q).then(setList);
+    const load = latestOnly(setList); // typing "ab" starts a search for "a" and one for "ab": the older one must not win
+    load.run(services.memories.search(q));
+    return load.cancel;
   }, [services, version, q]);
 
   return (
@@ -204,7 +216,9 @@ function DocsTab({ services, version }: { services: WorkspaceServices; version: 
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void services.docs.list().then(setList);
+    const load = latestOnly(setList);
+    load.run(services.docs.list());
+    return load.cancel;
   }, [services, version]);
 
   return (

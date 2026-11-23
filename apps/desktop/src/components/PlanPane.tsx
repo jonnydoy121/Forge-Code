@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { latestOnly } from "../lib/latestOnly";
 import { addStepComment, progress, validatePlan, type Plan, type StepStatus } from "@forge/plans";
 import type { WorkspaceServices } from "../lib/workspace";
 
@@ -26,7 +27,9 @@ export function PlanPane({ services, version, slug, building, onSelect, onBuild,
   const [comment, setComment] = useState<{ n: number; text: string } | null>(null);
 
   useEffect(() => {
-    void services.plans.list().then(setList);
+    const load = latestOnly(setList);
+    load.run(services.plans.list());
+    return load.cancel;
   }, [services, version]);
 
   const current = list.find((x) => x.slug === slug) ?? list[0];
