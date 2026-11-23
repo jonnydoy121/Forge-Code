@@ -235,3 +235,36 @@ describe("provider presets", () => {
     expect(parseArgs(["ask", "hi"], { FORGE_PROVIDER: "openrouter" })).toMatchObject({ preset: "openrouter" });
   });
 });
+
+describe("specialists in the CLI", () => {
+  const withAgent = (md: string) => {
+    const dir = project();
+    mkdirSync(`${dir}/.forge/agents`, { recursive: true });
+    writeFileSync(`${dir}/.forge/agents/reviewer.md`, md);
+    return dir;
+  };
+
+  it("offers delegate with the specialist, and the specialist runs with its own instructions and only its tools", async () => {
+    const dir = withAgent("---\ndescription: Reviews code\ntools: [read_file]\n---\nYou are the strict reviewer.");
+    const gw = new ScriptedGateway([
+      [call("1", "delegate", { task: "review a.js", agent: "reviewer" }), done],
+      [text("Looks fine."), done], // the specialist's report
+      [text("The reviewer says it looks fine."), done],
+    ]);
+    const t = io(dir, gw);
+    expect(await runCli(["ask", "have it reviewed", "--model", "m", "--json"], t.i)).toBe(0);
+    expect(JSON.parse(t.out()).answer).toBe("The reviewer says it looks fine.");
+    expect(gw.requests[0]!.tools!.map((x) => x.name)).toContain("delegate");
+    const sub = gw.requests[1]!;
+    expect(JSON.stringify(sub.messages)).toContain("strict reviewer");
+    expect(sub.tools!.map((x) => x.name)).toEqual(["read_file"]); // not grep, not edit_file, not delegate
+  });
+
+  it("refuses a specialist that does not exist, and tells the coordinator", async () => {
+    const dir = withAgent("---\ndescription: Reviews code\n---\nReview.");
+    const gw = new ScriptedGateway([[call("1", "delegate", { task: "x", agent: "ghost" }), done], [text("ok"), done]]);
+    const t = io(dir, gw);
+    expect(await runCli(["ask", "go", "--model", "m", "--json"], t.i)).toBe(0);
+    expect(JSON.stringify(gw.requests[1]!.messages)).toContain("ghost");
+  });
+});

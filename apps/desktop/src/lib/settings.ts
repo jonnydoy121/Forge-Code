@@ -63,6 +63,21 @@ export const DEFAULT_MODELS: Record<AgentSettings["provider"], string> = {
   ollama: "qwen2.5-coder:7b",
 };
 
+/** OpenAI-compatible endpoints worth one click. The model is a suggestion to edit; none of these has been run against the live service by this project. */
+export const ENDPOINT_PRESETS = [
+  { id: "openai", label: "OpenAI", baseUrl: "", model: "gpt-4o" },
+  { id: "gemini", label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  { id: "lmstudio", label: "LM Studio (local)", baseUrl: "http://localhost:1234/v1", model: "local-model" },
+] as const;
+
+/** Which preset a base URL belongs to ("custom" for anything else), so the picker reflects what is saved. */
+export function presetFor(baseUrl: string): string {
+  const url = baseUrl.trim().replace(/\/+$/, "");
+  return ENDPOINT_PRESETS.find((p) => p.baseUrl.replace(/\/+$/, "") === url)?.id ?? "custom";
+}
+
 export const DEFAULT_SETTINGS: AgentSettings = {
   provider: "ollama", // local-first: nothing leaves the machine until the user picks a hosted provider
   model: DEFAULT_MODELS.ollama,

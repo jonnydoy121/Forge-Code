@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, loadSettings, onSettingsChange, saveSettings, sendsCodeOffMachine } from "./settings";
+import { DEFAULT_SETTINGS, ENDPOINT_PRESETS, loadSettings, onSettingsChange, presetFor, saveSettings, sendsCodeOffMachine } from "./settings";
 
 const memory = () => {
   const m = new Map<string, string>();
@@ -52,5 +52,21 @@ describe("settings change notification", () => {
   it("is a no-op outside a browser", () => {
     expect(() => onSettingsChange(() => {})()).not.toThrow();
     expect(() => saveSettings(DEFAULT_SETTINGS, memory())).not.toThrow();
+  });
+});
+
+describe("endpoint presets", () => {
+  it("recognises a preset by its base URL, ignoring a trailing slash, and calls anything else custom", () => {
+    expect(presetFor("")).toBe("openai");
+    expect(presetFor("https://openrouter.ai/api/v1/")).toBe("openrouter");
+    expect(presetFor(" http://localhost:1234/v1 ")).toBe("lmstudio");
+    expect(presetFor("http://example.test/v1")).toBe("custom");
+  });
+
+  it("gives every preset a distinct address and a model, with OpenAI as the default address", () => {
+    const urls = ENDPOINT_PRESETS.map((p) => p.baseUrl);
+    expect(new Set(urls).size).toBe(urls.length);
+    expect(ENDPOINT_PRESETS.every((p) => p.model.length > 0)).toBe(true);
+    expect(ENDPOINT_PRESETS[0]).toMatchObject({ id: "openai", baseUrl: "" });
   });
 });

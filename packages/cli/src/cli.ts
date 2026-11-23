@@ -3,14 +3,14 @@
 
 import { resolve } from "node:path";
 import { Gateway, type ProviderConfig } from "@forge/model-gateway";
-import { Runtime } from "@forge/agent-runtime";
+import { Runtime, createSubAgentTool } from "@forge/agent-runtime";
 import { READ_TOOLS, createEditTools, createToolHost, type EditSink } from "@forge/tool-host";
 import { PendingChanges } from "@forge/review";
 import { InMemoryCheckpointStore } from "@forge/checkpoints";
 import type { ModelGateway } from "@forge/protocol";
 import { diskFs, promptFs, toolFs } from "./nodefs";
 import { headlessCommandTools } from "./commands";
-import { RuleEngine, createSkillTools, expandPrompt, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
+import { RuleEngine, createSkillTools, expandPrompt, loadAgents, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
 import { unifiedDiff } from "./format";
 
 export interface Io {
@@ -187,7 +187,18 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
   // The repo's rules (AGENTS.md, .forgerules, CLAUDE.md, .cursorrules, .forge/rules): a headless run follows them like the app does.
   // Without an open file, the rules that always apply are the ones that count (scoped ones need a file to match against).
   const rulesText = RuleEngine.render(await new RuleEngine(skillFs, root).applicable([]));
-  const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...skillTools, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : [])] : [...READ_TOOLS, ...skillTools] });
+  // Specialists (.forge/agents): the coordinator can hand a read-only investigation to one with its own instructions and tools.
+  // The CLI has no model tiers, so a specialist's `tier` is ignored here and it uses the same model.
+  const agents = await loadAgents(skillFs, `${root}/.forge/agents`, home ? `${home}/.forge/agents` : undefined);
+  const makeSub = (name?: string) => {
+    const def = name ? agents.find((a) => a.name === name) : undefined;
+    if (name && !def) throw new Error(`no specialist named "${name}"`);
+    const allowed = def?.tools ? READ_TOOLS.filter((t) => def.tools!.includes(t.spec.name)) : READ_TOOLS;
+    if (def && allowed.length === 0) throw new Error(`specialist "${def.name}" lists tools that do not exist or are not read-only: ${def.tools!.join(", ")}`);
+    return new Runtime({ gateway, tools: createToolHost({ root, fs: toolFs, tools: allowed }), provider: "default", model: o.model ?? "scripted", limits: { maxSteps: 10, maxCostUsd: o.maxCostUsd, maxSeconds: 900 }, sections: def ? () => [{ id: "specialist", label: `You are the "${def.name}" specialist`, priority: 0, text: def.instructions }] : undefined });
+  };
+  const delegate = createSubAgentTool({ make: makeSub, specialists: agents.map((a) => ({ name: a.name, description: a.description })), onCost: (usd) => runtime.addCost(usd) });
+  const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...skillTools, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : []), delegate] : [...READ_TOOLS, ...skillTools, delegate] });
   const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 },
     sections:
       rulesText || skills.length

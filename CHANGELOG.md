@@ -6,7 +6,9 @@
 - **Specialist agents** (`.forge/agents/*.md`, read-only tools, own model tier) used through `delegate`; Agents tab in the Context pane.
 - **`forge-code schedule`** (list / run-due [--at, --window] / run / watch) from `.forge/schedule.json`; results saved under `.forge/schedule/runs/`. Cron parser is clock-change safe (a first version looped forever when an hour repeated; found by a test, fixed).
 - **CLI provider presets**: gemini, openrouter, groq, lmstudio, each with its own key variable. Never run against the real services.
-- **`forge-code serve`**: read-only bearer-token HTTP `POST /ask`. Slack/Telegram/Linear/Discord adapters are NOT built.
+- **`forge-code serve`**: read-only `POST /ask` (bearer token) plus chat bridges: Slack slash command, Discord interactions, Linear comment webhook, Telegram long polling. Each verifies its platform's signature (mutation-tested); all mock-tested only, never run against the live services.
+- **`@forge/sdk`**: typed helpers for custom tools (`defineTool`, `runTool`, `toolsManifest`) and lifecycle hooks (`runHook`), tested as real processes.
+- **Specialists in the CLI** (`delegate`); **Endpoint presets in Settings** (Gemini, OpenRouter, Groq, LM Studio) that clear the shared key on switch so a key is never sent to another service (real-window test, mutation-checked).
 - New docs: CAPABILITIES.md (claim-by-claim status), AUTOMATION.md, EXTENDING.md, example GitHub Actions workflow (never run on a real runner).
 ### Fixes from a second review (the Rust indexer and the desktop lib)
 - **A failed database write left the index claiming files it had not stored.** Since index writes were pipelined, the in-memory index was updated while the writer was still storing batches, so a write error (disk full, a locked database) left memory ahead of the database until a restart. Before the pipelining, a failed write stopped before touching memory. Memory is now reset on a write failure, so it never claims more than the database has. A test breaks the database underneath the index to force the failure (memory held 10 files after the failed write before the fix, 0 after).

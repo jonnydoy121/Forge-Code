@@ -1,0 +1,12 @@
+{
+  "name": "@forge/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {},
+  "devDependencies": {
+    "@forge/context-store": "*",
+    "@forge/verify": "*"
+  }
+}

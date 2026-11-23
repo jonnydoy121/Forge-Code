@@ -13,7 +13,7 @@ import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
 import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
 import { prewarmRuntime } from "../lib/runtimeProcess";
-import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
+import { DEFAULT_MODELS, ENDPOINT_PRESETS, loadSettings, presetFor, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { parsePrices } from "@forge/model-gateway";
 import { cleanCommitMessage } from "../lib/commitMessage";
 import { latestOnly } from "../lib/latestOnly";
@@ -611,10 +611,27 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               <option value="openai">OpenAI-compatible</option>
             </select>
           </Row>
+          {settings.provider === "openai" && (
+            <Row label="Endpoint">
+              <select
+                data-testid="endpoint-preset"
+                className="rounded bg-[var(--hover)] px-1 py-0.5"
+                value={presetFor(settings.baseUrl)}
+                // The key is stored once for all OpenAI-compatible endpoints, so switching clears it: a key for one service is never sent to another.
+                onChange={(e) => {
+                  const p = ENDPOINT_PRESETS.find((x) => x.id === e.target.value);
+                  if (p) update({ baseUrl: p.baseUrl, model: p.model, apiKey: "" });
+                }}
+              >
+                {presetFor(settings.baseUrl) === "custom" && <option value="custom">Custom URL</option>}
+                {ENDPOINT_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+            </Row>
+          )}
           <Row label="Model"><input data-testid="main-model" className={FIELD} value={settings.model} onChange={(e) => update({ model: e.target.value })} /></Row>
           <Row label="Base URL"><input data-testid="base-url" className={FIELD} placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></Row>
           <Row label="API key"><input type="password" className={FIELD} value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></Row>
-          <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>
+          <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.{settings.provider === "openai" ? " One key is kept for all OpenAI-compatible endpoints, so choosing another endpoint clears it: paste the key for that service." : ""}</p>
 
           <SettingsHeading>Claude plan (no API key)</SettingsHeading>
           <p className="text-[var(--muted)]">Use your Claude subscription (Pro or Max) through the official Claude Code client. Forge never sees your login; its file edits still come to you for review.</p>
