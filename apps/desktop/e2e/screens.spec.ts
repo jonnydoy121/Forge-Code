@@ -91,6 +91,17 @@ test("capture the main screens", async () => {
     await page.keyboard.press("Control+Shift+P");
     await shot("12-light-palette");
     await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+Shift+K");
+    await page.getByTestId("ctx-tab-skills").click();
+    await shot("13-light-context");
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.press("Control+Shift+L");
+    await shot("14-light-plan");
+    await page.keyboard.press("Control+Shift+L");
+    await page.keyboard.press("Control+`");
+    await page.waitForTimeout(1500);
+    await shot("15-light-terminal");
+    await page.keyboard.press("Control+`");
 
     await page.getByTestId("thread-new").click();
     await shot("08-second-thread");
