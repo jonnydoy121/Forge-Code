@@ -1,4 +1,4 @@
-import * as monaco from "monaco-editor";
+import * as monaco from "./monaco-features"; // only the editor features this app uses (see that file)
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { languageForPath, normalizeUri, pathToUri } from "./uri";
 import { fsApi } from "./ipc";
@@ -7,15 +7,6 @@ import type { Diagnostic } from "./lspClient";
 (self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
 };
-
-// Diagnostics come from real language servers over LSP, so silence Monaco's bundled TS checker.
-// The API moved between Monaco releases (languages.typescript vs typescript); handle both.
-const m = monaco as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-for (const ns of [m.typescript, m.languages?.typescript]) {
-  for (const defaults of [ns?.typescriptDefaults, ns?.javascriptDefaults]) {
-    defaults?.setDiagnosticsOptions?.({ noSemanticValidation: true, noSyntaxValidation: true });
-  }
-}
 
 export { monaco };
 

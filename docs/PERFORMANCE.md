@@ -81,6 +81,31 @@ matches after a restart. Timings on this machine drift by up to about 30% with b
 ### Smaller fixes
 - The UI polled localStorage every second, forever, to notice a settings change. It now listens for a change event.
 
+### Trimming the Monaco editor engine
+Measured first (esbuild metafile of the engine): the core (`base`, `editor/common`, `editor/browser`, `platform`) is about
+2.25 MB, 58% of it, and cannot be removed; optional editor contributions are about 0.7 MB; the JSON/HTML/CSS/TypeScript language
+services are 136 KB. Forge-Code registers one Monaco provider (ghost-text completions) and takes diagnostics from real language
+servers, so every feature that needs providers the app never registers (go to definition, rename, code actions, signature help,
+colour picker, formatting, semantic tokens, inlay hints, code lens, the diff editor) does nothing today, and the TypeScript, HTML
+and CSS language services could never run (their workers are not provided).
+
+`src/lib/monaco-features.ts` now imports only what the app uses instead of `import "monaco-editor"`. Result in the real build:
+the engine chunk 3,334 -> 3,135 KB (-6%, gzip 858 -> 807 KB), its CSS 133 -> 120 KB, everything shipped 5,126 -> 4,827 KB.
+
+| | Before | After |
+|---|---|---|
+| Monaco chunk | 3,334 KB | 3,135 KB |
+| Everything shipped | 5,126 KB | 4,827 KB |
+| Memory | no measurable change | |
+
+The ceiling is low because most of the engine is the core. I could not measure a memory difference beyond run-to-run noise, so
+the benefit is a smaller parse and download (about 200 KB), not a smaller footprint. Behaviour is protected by end-to-end tests:
+syntax colouring for TypeScript, JavaScript, Python, CSS, HTML, JSON and Rust (and plain text staying uncoloured, so the check
+means something), the editor's find widget, and its F1 palette including our "Edit selection with AI" action; the existing suites
+cover ghost-text completions, diagnostics, keyboard-only use and accessibility.
+Maintenance note: the import paths are tied to the pinned Monaco 0.52.2. A path that no longer exists fails the build loudly; an
+upgrade should re-derive the list from the engine's own `editor.all` entry rather than patching it.
+
 ### One agent process for every thread
 Each agent thread used to start its own `forge-runtime` process. They now share one: every line on the wire carries a session id,
 the process creates a runtime per id, and it is started on demand and released when the last thread closes.
@@ -118,5 +143,3 @@ processes are now stopped when the page starts loading.
 - Real embedding model (nomic-embed-text via Ollama): batching 16 chunks per request is 1.7x faster than one request each.
 
 ## Ideas not done (with the reason)
-- **Trim Monaco to the features and languages Forge-Code uses.** Could shrink the 3.3 MB engine and its memory, but needs a
-  careful feature audit to avoid regressions; no measurement yet says what is safe to drop.

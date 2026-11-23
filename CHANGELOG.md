@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Monaco trimmed to what the app uses
+- `src/lib/monaco-features.ts` imports only the editor features Forge-Code uses (no go-to-definition, rename, code actions, signature help, colour picker, formatting, semantic tokens, inlay hints, code lens, and no TypeScript/HTML/CSS language services, whose workers were never provided): the engine chunk 3,334 -> 3,135 KB (-6%), everything shipped 5,126 -> 4,827 KB. No measurable memory change; the benefit is about 200 KB less to download and parse. Verified by end-to-end tests for syntax colouring across seven file types (plain text stays uncoloured), find, and the F1 palette with our AI action, plus the existing suites. Tied to the pinned Monaco 0.52.2 (a missing path fails the build).
+- Final startup, real release build, baseline vs now: DOM ready 196 -> 34 ms, first paint 228 -> 128 ms, shell mounted 324 -> 134 ms, startup JavaScript 3,971 -> 357 KB; memory 385 -> 378 MB.
+
 ### One agent process for every thread
 - All agent threads now share a single `forge-runtime` process instead of one each: memory for three threads 97 -> 33 MB (-66%). A session id on every line (`{"s": id, "m": message}`, `{"s": id, "end": true}`), a runtime per id inside the process, started on demand and released when the last thread closes. Failure modes handled and tested against real processes: isolation between sessions, closing one aborts only its own work, a crashed process fails every pending run immediately (it used to hang) and the next message starts a fresh process with the conversation carried over.
 - Fixed two real bugs found along the way: closing a thread did not cancel its in-flight model request (the host kept streaming and spending tokens), and a page reload orphaned the agent runtime, MCP/ACP servers and background commands until the app exited (they are now stopped when the page starts loading).
