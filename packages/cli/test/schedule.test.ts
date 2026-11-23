@@ -130,6 +130,36 @@ describe("schedule run-due", () => {
     expect(t.out()).toContain("$0.10");
   });
 
+  it("with --window, a job that matched a few minutes ago is still due (a CI trigger that fires late or only every 15 minutes), and runs once", async () => {
+    const dir = repo({ jobs: [{ name: "nightly", cron: "0 2 * * *", prompt: "review" }, { name: "other", cron: "30 9 * * *", prompt: "other" }] });
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    const t = harness(dir, gw);
+    // triggered at 02:11, a late trigger for 02:00
+    expect(await runSchedule(["run-due", "--at", "2026-03-04T02:11:00", "--window", "15"], t.io)).toBe(0);
+    expect(gw.requests).toHaveLength(1);
+    expect(runs(dir)).toEqual(["nightly-20260304-0200.json"]); // recorded under the minute it was due, not the minute it ran
+    // outside the window: not due; and without a window only the current minute counts
+    const late = new ScriptedGateway([]);
+    expect(await runSchedule(["run-due", "--at", "2026-03-04T02:16:00", "--window", "15"], harness(repo({ jobs: [{ name: "nightly", cron: "0 2 * * *", prompt: "x" }] }), late).io)).toBe(0);
+    expect(late.requests).toHaveLength(0);
+    expect(await runSchedule(["run-due", "--at", "2026-03-04T02:11:00"], harness(repo({ jobs: [{ name: "nightly", cron: "0 2 * * *", prompt: "x" }] }), late).io)).toBe(0);
+    expect(late.requests).toHaveLength(0);
+  });
+
+  it("with --window a job that matched several times in the window runs once, for the latest match", async () => {
+    const dir = repo({ jobs: [{ name: "often", cron: "*/5 * * * *", prompt: "often" }] });
+    const gw = new ScriptedGateway([[text("ok"), done], [text("ok"), done]]);
+    const t = harness(dir, gw);
+    expect(await runSchedule(["run-due", "--at", "2026-03-04T02:13:00", "--window", "15"], t.io)).toBe(0);
+    expect(gw.requests).toHaveLength(1);
+    expect(runs(dir)).toEqual(["often-20260304-0210.json"]);
+  });
+
+  it("rejects a window that is not a number of minutes", async () => {
+    const dir = repo({ jobs: [] });
+    for (const bad of ["0", "-3", "abc", "5000"]) expect(await runSchedule(["run-due", "--window", bad], harness(dir, undefined).io), bad).toBe(1);
+  });
+
   it("says when nothing is due, and runs nothing", async () => {
     const dir = repo({ jobs: [{ name: "nightly", cron: "0 2 * * *", prompt: "x" }] });
     const gw = new ScriptedGateway([]);

@@ -152,6 +152,8 @@ Usage:
 Options:
   --file <path>     the schedule file (default .forge/schedule.json)
   --at <time>       treat this as the current time (an ISO date and time), for run-due
+  --window <n>      run-due: a job is due if it matched at any time in the last n minutes (default 1). Use it when the
+                    trigger is late or coarse, such as a CI schedule that fires every 15 minutes: --window 15
   --ticks <n>       watch: stop after n minutes (default: run until stopped)
 
 Each job: {"name", "cron", "prompt", "command": "ask" | "run", "apply": false, "allow": [], "maxCost", "maxSteps", "model", "provider", "baseUrl", "enabled"}.
@@ -167,6 +169,7 @@ export async function runSchedule(args: string[], io: ScheduleIo): Promise<numbe
   let file = ".forge/schedule.json";
   let at: Date | null = null;
   let ticks = Infinity;
+  let window = 1;
   const names: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
@@ -180,6 +183,9 @@ export async function runSchedule(args: string[], io: ScheduleIo): Promise<numbe
       else if (a === "--at") {
         at = new Date(value());
         if (Number.isNaN(at.getTime())) return io.err("forge-code: --at needs a date and time such as 2026-03-04T02:00\n"), 1;
+      } else if (a === "--window") {
+        window = Math.floor(Number(value()));
+        if (!(window >= 1 && window <= 1440)) return io.err("forge-code: --window must be a whole number of minutes from 1 to 1440\n"), 1;
       } else if (a === "--ticks") {
         ticks = Math.floor(Number(value()));
         if (!(ticks >= 1)) return io.err("forge-code: --ticks must be a whole number of at least 1\n"), 1;
@@ -223,15 +229,26 @@ export async function runSchedule(args: string[], io: ScheduleIo): Promise<numbe
   }
 
   if (names.length) return io.err(`forge-code: "schedule ${sub}" takes no job names\n`), 1;
-  const runDue = async (when: Date) => {
-    const due = jobs.filter((j) => cronMatches(j.cron, when));
+  /** The latest minute in the last `back` minutes (ending at `when`) at which the job's schedule matched, or null. */
+  const lastMatch = (j: Job, when: Date, back: number): Date | null => {
+    const end = Math.floor(when.getTime() / 60_000) * 60_000;
+    for (let i = 0; i < back; i++) {
+      const m = new Date(end - i * 60_000);
+      if (cronMatches(j.cron, m)) return m;
+    }
+    return null;
+  };
+  const runDue = async (when: Date, back = 1) => {
     const codes: number[] = [];
-    for (const j of due) codes.push(await runJob(j, io, root, when));
+    for (const j of jobs) {
+      const m = lastMatch(j, when, back);
+      if (m) codes.push(await runJob(j, io, root, m));
+    }
     return codes;
   };
 
   if (sub === "run-due") {
-    const codes = await runDue(at ?? now());
+    const codes = await runDue(at ?? now(), window);
     if (codes.length === 0) io.out("Nothing is due.\n");
     return Math.max(worst(codes), errors.length ? 1 : 0);
   }
