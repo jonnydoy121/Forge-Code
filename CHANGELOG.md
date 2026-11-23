@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+### Polish, from looking at the running app next to Cursor, Zed, VS Code and Kiro
+Found by screenshotting the real window (before and after) rather than by guessing. Each item has a real-window test that fails without it.
+- **Scrollbars and form controls follow the theme.** The default scrollbars were wide and bright white in the dark theme (under chat code blocks and in Settings). The page now declares its color scheme (dark, light in the light theme) and uses slim themed scrollbars.
+- **The agent header stays on one row.** "Settings" used to wrap onto a second line by itself. The mode picker, privacy badge and the three buttons now fit in one row; the "Agent" label is kept for screen readers only.
+- **Tool rows say what they touched** ("read_file src/app.ts", "run_command npm test") instead of only a name, so a collapsed row means something without opening it.
+- **The empty chat helps.** It explains the current mode (it used to say "Mode ask is read-only" even in agent mode) and offers clickable starter prompts that fill the box without sending; they go once a conversation starts.
+- **The review panel no longer shows an empty "Checks:" label** before anything has been checked.
+- **The empty editor screen shows its shortcuts as key chips**, and the Settings panel lost a stray horizontal scrollbar.
+- Looked at and left alone: thread-tab buttons already had tooltips; the diff review, chat markdown and code blocks already looked right.
+- **Not done (ideas from the same comparison):** a full-page Settings screen instead of the narrow panel, syntax highlighting in chat code blocks, file-type icons in the explorer, resizable panels.
+
 ### Settings: Strata connection, schedules and bridges, auto-skill controls
 - **Test connection** (Settings, OpenAI-compatible): asks the endpoint's `/models` with the typed key, shows what the server says (a 401 comes back as "Invalid API key... check the API key") and offers the listed models for the Model field. Works for Strata and any OpenAI-compatible server. Checked against a mock that enforces a key (real window) and against Strata's real `/models` response shape.
 - **Context > Schedule tab**: add, edit, enable/disable and remove jobs in `.forge/schedule.json`, with each job's next run and what is wrong with a broken one. Changes are checked with the command line's own parser before anything is written; fields the screen does not show survive an edit; a file that is not valid JSON is reported and never overwritten. The app does not run the jobs (call `forge-code schedule run-due` from Task Scheduler or cron).

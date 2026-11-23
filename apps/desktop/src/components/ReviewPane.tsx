@@ -233,7 +233,9 @@ export function ReviewPane({ pending, root, version, onResolved, onRevise, onClo
                     Needs your explicit approval: this change {file.warnings.join("; ")}. Auto-apply is disabled for it.
                   </div>
                 )}
-                <div className="flex gap-2 px-3 pt-1 text-xs text-[var(--muted)]">Checks: <Badges report={report} file={rel(root, file.path)} /></div>
+                {report && BADGE_KINDS.some(([kind]) => report.checks.some((c) => c.kind === kind && !c.skipped)) && (
+                  <div className="flex gap-2 px-3 pt-1 text-xs text-[var(--muted)]" data-testid="review-checks">Checks: <Badges report={report} file={rel(root, file.path)} /></div>
+                )}
                 {file.conflict ? (
                   <ConflictView file={file} onResolve={(t) => void run(() => pending.resolveConflict(file.path, t))} />
                 ) : (

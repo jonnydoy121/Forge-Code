@@ -31,6 +31,11 @@
   --color-blue-900: #bfdbfe;
 }
 html, body, #root { height: 100%; margin: 0; }
+/* Tell the browser which theme the page is, so form controls and scrollbars are drawn for it instead of the bright default. */
+:root { color-scheme: dark; }
+.light { color-scheme: light; }
+/* Slim scrollbars that follow the theme (the default ones are wide and white in the dark theme). */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 body { font-family: system-ui, sans-serif; }
 
 /* Pending agent changes layered on the editor */

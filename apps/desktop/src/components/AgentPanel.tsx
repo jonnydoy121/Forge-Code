@@ -11,6 +11,8 @@ import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
 import { checkEndpoint, type EndpointCheck } from "../lib/endpoint";
+import { toolSummary } from "../lib/toolSummary";
+import { startersFor } from "../lib/starters";
 import { pickFetch } from "../lib/http";
 import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
@@ -55,7 +57,7 @@ export interface RunOutcome {
 type Item =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; name: string; ok: boolean; output: string; id?: string }
+  | { kind: "tool"; name: string; ok: boolean; output: string; id?: string; summary?: string }
   | { kind: "notice"; text: string }
   | { kind: "report"; report: VerificationReport; source: string }
   | { kind: "injection"; tool: string; findings: { pattern: string; excerpt: string }[] }
@@ -153,6 +155,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [mode, setMode] = useState<Mode>("ask");
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState("");
+  const inputEl = useRef<HTMLTextAreaElement>(null);
   const [chips, setChips] = useState<Attachment[]>([]);
   const [attachKind, setAttachKind] = useState<Attachment["kind"] | "">("");
   const [attachArg, setAttachArg] = useState("");
@@ -467,6 +470,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
       }
       abort.current = new AbortController();
       mark("send: run() called");
+      const callSummaries = new Map<string, string>(); // what each tool call touched, shown on its row
       for await (const ev of rt.run({ mode: runMode, prompt, signal: abort.current.signal })) {
         if (ev.type === "text") {
           setItems((i) => {
@@ -477,8 +481,11 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             }
             return i;
           });
+        } else if (ev.type === "tool_call") {
+          callSummaries.set(ev.call.id, toolSummary(ev.call.args));
         } else if (ev.type === "tool_result") {
-          setItems((i) => replaceLastAssistant(i, [{ kind: "tool", name: ev.name, ok: ev.result.ok, output: ev.result.output }, { kind: "assistant", text: "" }]));
+          const summary = callSummaries.get(ev.result.id);
+          setItems((i) => replaceLastAssistant(i, [{ kind: "tool", name: ev.name, ok: ev.result.ok, output: ev.result.output, summary }, { kind: "assistant", text: "" }]));
         } else if (ev.type === "verify") {
           const report = ev.report as VerificationReport;
           outcome.report = report;
@@ -587,12 +594,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
 
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)]" aria-label="Agent panel" data-testid="agent-panel">
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--border)] px-3 py-1.5 text-sm">
-        <strong>Agent</strong>
+      <header className="flex flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-[var(--border)] px-2 py-1.5 text-sm" data-testid="agent-header">
+        <strong className="sr-only">Agent</strong>
         <select
           aria-label="Mode"
           data-testid="mode-select"
-          className="w-[7.5rem] rounded bg-[var(--hover)] px-1" /* a fixed width: a select is as wide as its longest option, so a new or long agent name would otherwise move the header buttons */
+          className="w-[6.5rem] rounded bg-[var(--hover)] px-1" /* a fixed width: a select is as wide as its longest option, so a new or long agent name would otherwise move the header buttons */
           value={external ? `ext:${external}` : mode}
           onChange={(e) => {
             const v = e.target.value;
@@ -613,13 +620,13 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={badgeTitle}>
           {offMachine ? "remote" : "local"}
         </span>
-        <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
-        <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" onClick={() => { setShowAudit((s) => !s); setShowTimeline(false); }}>Audit</button>
-        <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" aria-pressed={showSettings} onClick={() => setShowSettings((s) => !s)} data-testid="settings-toggle">Settings</button>
+        <button className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs hover:bg-[var(--hover)]" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
+        <button className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs hover:bg-[var(--hover)]" onClick={() => { setShowAudit((s) => !s); setShowTimeline(false); }}>Audit</button>
+        <button className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs hover:bg-[var(--hover)]" aria-pressed={showSettings} onClick={() => setShowSettings((s) => !s)} data-testid="settings-toggle">Settings</button>
       </header>
 
       {showSettings && (
-        <div className="max-h-[60vh] space-y-1 overflow-auto border-b border-[var(--border)] p-3 text-xs" data-testid="settings">
+        <div className="max-h-[60vh] space-y-1 overflow-y-auto overflow-x-hidden border-b border-[var(--border)] p-3 text-xs" data-testid="settings">
           <SettingsHeading first>Model</SettingsHeading>
           <Row label="Provider">
             <select className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.provider} onChange={(e) => update({ provider: e.target.value as AgentSettings["provider"], model: DEFAULT_MODELS[e.target.value as AgentSettings["provider"]] })}>
@@ -811,7 +818,20 @@ ${diff}`, { tier: "scout" }));
         </div>
       ) : (
         <div className="flex-1 space-y-2 overflow-auto p-3 text-sm" data-testid="messages" role="log" aria-label="Conversation" tabIndex={0}>
-          {items.length === 0 && <p className="text-[var(--muted)]">Ask a question about this codebase. Mode "ask" is read-only.</p>}
+          {items.length === 0 && (
+            <div className="space-y-2" data-testid="starters">
+              <p className="text-[var(--muted)]">{startersFor(external ? "ask" : mode, activePath).intro}</p>
+              {root && services && !external && (
+                <div className="flex flex-col items-start gap-1" role="group" aria-label="Suggested prompts">
+                  {startersFor(mode, activePath).prompts.map((p) => (
+                    <button key={p} data-testid="starter" className="rounded border border-[var(--border)] px-2 py-1 text-left text-xs hover:bg-[var(--hover)]" onClick={() => { setInput(p); inputEl.current?.focus(); }}>
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {items.map((it, i) =>
             it.kind === "injection" ? (
               <div key={i} className="rounded border border-red-700 bg-red-900/20 px-2 py-1 text-xs" role="alert" data-testid="injection-warning">
@@ -846,7 +866,10 @@ ${diff}`, { tier: "scout" }));
               <ReportCard key={i} report={it.report} source={it.source} />
             ) : it.kind === "tool" ? (
               <details key={i} className="rounded border border-[var(--border)] px-2 py-1 text-xs" data-testid="tool-call">
-                <summary>{it.ok ? "✓" : "✗"} {it.name}</summary>
+                <summary>
+                  {it.ok ? "✓" : "✗"} {it.name}
+                  {it.summary ? <span className="ml-1 text-[var(--muted)]" data-testid="tool-summary">{it.summary}</span> : null}
+                </summary>
                 <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap">{it.output}</pre>
               </details>
             ) : (
@@ -952,6 +975,7 @@ ${diff}`, { tier: "scout" }));
         )}
         <textarea
           data-testid="agent-input"
+          ref={inputEl}
           onFocus={() => settings.runtimeProcess && prewarmRuntime()}
           rows={3}
           disabled={!root || !services}
