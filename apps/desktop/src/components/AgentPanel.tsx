@@ -24,7 +24,8 @@ import { Timeline } from "./Timeline";
 import { classifyIntent, looksLarge } from "@forge/plans";
 import { ReportCard } from "./ReportCard";
 import type { VerificationReport } from "@forge/verify";
-import { git, type ReportEvent } from "../lib/workspace";
+import { git, tauriExec, type ReportEvent } from "../lib/workspace";
+import { CLAUDE_AGENT, describeClaudePlan, detectClaudePlan, type ClaudePlan } from "../lib/claudePlan";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
 
@@ -168,6 +169,9 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [auditFilter, setAuditFilter] = useState<"all" | "network" | "command" | "file" | "blocked">("all");
   const [showAudit, setShowAudit] = useState(false);
   const [external, setExternal] = useState<string | null>(null);
+  // Claude Code signed in with the developer's own Claude account: offered as an agent, no API key needed.
+  const [claudePlan, setClaudePlan] = useState<ClaudePlan | null>(null);
+  const [claudeCheck, setClaudeCheck] = useState(0);
   const [showTimeline, setShowTimeline] = useState(false);
   const [suggest, setSuggest] = useState<string | null>(null);
   const runtime = useRef<AgentRuntime | null>(null);
@@ -231,6 +235,25 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
       if (kind) void loadApiKey(kind).then((k) => setSettings((cur) => (cur[`${t}ApiKey` as const] === k ? cur : { ...cur, [`${t}ApiKey`]: k })));
     }
   }, [settings.scoutProvider, settings.architectProvider]);
+
+  useEffect(() => {
+    if (!services || !root) return;
+    let live = true;
+    setClaudePlan(null);
+    void detectClaudePlan((command) => tauriExec.run(command, { cwd: root, sandbox: false, timeoutMs: 15_000 })).then((p) => {
+      if (live) setClaudePlan(p);
+    });
+    return () => {
+      live = false;
+    };
+  }, [services, root, claudeCheck]);
+  // Claude runs on Anthropic's servers, so local-only mode hides it; a login that is not a subscription would bill an account, so it is
+  // still offered but says so in Settings. Set before the mode list is drawn (an idempotent flag), so the list shows it at once.
+  const offerClaude = claudePlan?.state === "signed-in" && !settings.localOnly;
+  services?.acp.useBuiltinClaude(offerClaude);
+  useEffect(() => {
+    if (external === CLAUDE_AGENT.name && !offerClaude) setExternal(null);
+  }, [external, offerClaude]);
 
   const update = (patch: Partial<AgentSettings>) => {
     const next = { ...settings, ...patch };
@@ -521,8 +544,18 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     });
   }, [registerSend, active]);
 
-  const offMachine = sendsCodeOffMachine(settings) || tiersSendOffMachine(settings);
+  const offMachine = sendsCodeOffMachine(settings) || tiersSendOffMachine(settings) || external !== null; // an external agent decides for itself where code goes
   const unpriced = unpricedRemoteModels(settings);
+  const badgeTitle =
+    external !== null
+      ? external === CLAUDE_AGENT.name
+        ? "Claude Code sends your prompts and the code it reads to Anthropic"
+        : `The external agent "${external}" runs on its own: check where it sends your code`
+      : !offMachine
+        ? "Local model: nothing leaves this machine"
+        : sendsCodeOffMachine(settings)
+          ? "Prompts and attached code are sent to a remote server"
+          : "The main model is local, but a routing tier (scout or architect) is remote: some prompts and attached code can leave this machine";
   const priceErrors = parsePrices(settings.customPrices).errors;
   const category = (id: string) => (id === "system" || id === "mode" ? "System prompt" : id === "rules" ? "Rules" : id === "memories" ? "Memories" : id === "plan" ? "Plan" : id === "repo-map" ? "Repo map" : id === "conversation" ? "Conversation" : "Attachments");
   const byCategory = new Map<string, number>();
@@ -531,12 +564,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
 
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)]" aria-label="Agent panel" data-testid="agent-panel">
-      <header className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 text-sm">
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--border)] px-3 py-1.5 text-sm">
         <strong>Agent</strong>
         <select
           aria-label="Mode"
           data-testid="mode-select"
-          className="rounded bg-[var(--hover)] px-1"
+          className="max-w-[8rem] rounded bg-[var(--hover)] px-1" /* a select is as wide as its longest option: capped, so a long agent name cannot push the header buttons out of the panel */
           value={external ? `ext:${external}` : mode}
           onChange={(e) => {
             const v = e.target.value;
@@ -551,10 +584,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             <option key={m} value={m}>{m}</option>
           ))}
           {(services?.acp.agents ?? []).map((a) => (
-            <option key={a.name} value={`ext:${a.name}`}>external: {a.name}</option>
+            <option key={a.name} value={`ext:${a.name}`}>{a === CLAUDE_AGENT ? "Claude plan" : `external: ${a.name}`}</option>
           ))}
         </select>
-        <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={offMachine ? (sendsCodeOffMachine(settings) ? "Prompts and attached code are sent to a remote server" : "The main model is local, but a routing tier (scout or architect) is remote: some prompts and attached code can leave this machine") : "Local model: nothing leaves this machine"}>
+        <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={badgeTitle}>
           {offMachine ? "remote" : "local"}
         </span>
         <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
@@ -576,6 +609,14 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           <Row label="Base URL"><input data-testid="base-url" className={FIELD} placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></Row>
           <Row label="API key"><input type="password" className={FIELD} value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></Row>
           <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>
+
+          <SettingsHeading>Claude plan (no API key)</SettingsHeading>
+          <p className="text-[var(--muted)]">Use your Claude subscription (Pro or Max) through the official Claude Code client. Forge never sees your login; its file edits still come to you for review.</p>
+          <p data-testid="claude-status">{describeClaudePlan(claudePlan, settings.localOnly)}</p>
+          <div className="flex items-center gap-2">
+            <button className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)]" data-testid="claude-recheck" onClick={() => setClaudeCheck((n) => n + 1)}>Check again</button>
+            <span className="text-[var(--muted)]">It uses your plan's limits, not the Max $ above, and Claude Code sends your prompts and the code it reads to Anthropic.</span>
+          </div>
 
           <SettingsHeading>Model routing (optional)</SettingsHeading>
           <p className="text-[var(--muted)]">Use a cheaper model for chores and a stronger one where it counts. Left off, the main model above does everything.</p>

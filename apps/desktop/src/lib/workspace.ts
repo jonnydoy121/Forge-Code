@@ -25,6 +25,7 @@ import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/pla
 import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts, loadPrompts, loadSkills, createSkillTools, type SavedPrompt, type Skill } from "@forge/context-store";
 import { loadSettings } from "./settings";
 import { createDiagnosticsTool, type CheckResult } from "./diagnosticsTool";
+import { CLAUDE_AGENT } from "./claudePlan";
 import { fetchText as rawFetchText, pickFetch } from "./http";
 import type { VerifyDeps } from "@forge/agent-runtime";
 import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
@@ -148,7 +149,10 @@ export interface WorkspaceServices {
   commandTools(settings: { sandbox: boolean; toolchainRead: boolean }): RegisteredTool[];
   mcp: { configured: McpServerConfig[]; status(): McpServerStatus[]; connect(): Promise<RegisteredTool[]>; disconnect(): void; tools(): RegisteredTool[]; errors: string[] };
   acp: {
-    agents: AcpAgentConfig[];
+    /** The agents from .forge/acp.json, plus Claude (your Claude plan) when it has been switched on and the file does not define its own. */
+    readonly agents: AcpAgentConfig[];
+    /** Offer the built-in Claude agent (Claude Code, signed in with the developer's own Claude account). */
+    useBuiltinClaude(on: boolean): void;
     errors: string[];
     /** Run one prompt through an external agent; its file edits land in the review UI. */
     prompt(agent: string, text: string, onUpdate: (u: AcpUpdate) => void, signal?: AbortSignal): Promise<{ stopReason: string }>;
@@ -379,11 +383,18 @@ export async function createWorkspaceServices(opts: {
 
   const acpCfg = parseAcpConfig(await diskFs.read(`${root}/.forge/acp.json`));
   const acpClients = new Map<string, { client: AcpClient; session: string; close: () => void; onUpdate: { current: (u: AcpUpdate) => void } }>();
+  let builtinClaude = false;
+  const allAgents = () => (builtinClaude && !acpCfg.agents.some((a) => a.name === CLAUDE_AGENT.name) ? [...acpCfg.agents, CLAUDE_AGENT] : acpCfg.agents);
   const acpHandle = {
-    agents: acpCfg.agents,
+    get agents() {
+      return allAgents();
+    },
+    useBuiltinClaude: (on: boolean) => {
+      builtinClaude = on;
+    },
     errors: acpCfg.errors,
     prompt: async (name: string, text: string, onUpdate: (u: AcpUpdate) => void, signal?: AbortSignal) => {
-      const cfg = acpCfg.agents.find((a) => a.name === name);
+      const cfg = allAgents().find((a) => a.name === name);
       if (!cfg) throw new Error(`no external agent named ${name}`);
       let entry = acpClients.get(name);
       if (!entry) {

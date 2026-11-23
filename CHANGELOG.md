@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Claude on your Claude plan (no API key)
+- **"Claude plan"** appears in the mode list when Claude Code is installed and signed in with a Claude account, with no config file. Forge drives the official Claude Code client over ACP; your login never passes through Forge (it only runs `claude auth status`). Its edits go to the review pane, commands and out-of-project reads ask first, and the usual start-of-agent prompt appears. Settings > Claude plan shows the status in plain words (signed in, not signed in, not installed, or a non-subscription login that would bill that account) with a Check again button. A `claude` entry in `.forge/acp.json` replaces the built-in one.
+- Honest about where code goes: the privacy badge says "remote" while an external agent is selected, and **local-only mode hides Claude**.
+- Verified on this machine with a Claude plan and no API key: the live ACP test started the adapter, Claude read a file and tried an edit, and Forge captured it as a pending proposal with nothing written to disk. Mode list, status, badge and local-only hiding are covered in the real window (`claude-plan.spec.ts`, reading the real `claude auth status`); detection logic has 9 unit tests.
+- Found while testing: the longer mode-list entry widened the agent header past the panel and pushed the Settings button off-screen (caught by the accessibility scan, not by eye). The label is now short ("Claude plan"), the mode select has a maximum width (so a long agent name cannot do the same), and the header wraps instead of overflowing; a test checks the header buttons stay inside the window.
+- Not built: using the plan for Forge's own routing tiers or caching (those need the API; Claude Code runs its own loop). Details: `docs/CLAUDE-PLAN.md`.
+
 ### Verification says what it could not check
 - When the language server cannot check a file the run touched (not installed, or it did not answer in time, or more than 20 files changed), the report now lists it under "Not verified" ("the language server could not check 2 files: a.py (the language server is not available), ..."), instead of staying silent and letting "no errors" say more than is known. It is not counted as an error in the code. File types with no language server at all (markdown, JSON) stay out of it, so docs edits are not noisy. This closes the known limit noted with the unopened-files change.
 - Tests: the report (1), `collectErrors` (updated), plus the 54 existing end-to-end tests.
