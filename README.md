@@ -26,6 +26,11 @@ CI is green on Windows, macOS and Linux (lint, typecheck, unit tests, Rust tests
 accessibility checks only. See [CHANGELOG.md](CHANGELOG.md), [ARCHITECTURE.md](ARCHITECTURE.md) and
 [docs/RESEARCH.md](docs/RESEARCH.md) (competitive research and roadmap).
 
+## Try the app
+- **Quickest (development window, reloads as you edit):** `npm ci`, then `npm run dev`. The first run compiles the Rust host and takes a few minutes.
+- **A real installer:** `npm run app:build`. It produces `target/release/bundle/nsis/Forge-Code_0.0.0_x64-setup.exe` (run it to install) and the plain program `target/release/forge-desktop.exe` (run it without installing).
+- Then open a folder from the app. With no API key, pick **Ollama (local)** (install Ollama and `ollama pull qwen2.5-coder:7b`), or use the Claude plan option if you have the Claude Code client signed in. Settings (gear icon) has the provider, endpoint presets, model, and key.
+
 ## Develop
 Requirements: Node 26 (the agent runtime is built as a Node single-executable), Rust stable, and on Windows the MSVC
 toolchain and WebView2.
