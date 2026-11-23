@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HookRunner,
+  UNCHECKED,
   detectWeakening,
   discoverCommands,
   feedbackMessage,
@@ -149,6 +150,21 @@ describe("runChecks", () => {
     const r = await runChecks({ commands: { sources: {} }, exec: fakeExec(() => ({})).exec, cwd: "/r", phase: "full", touched: [] });
     expect(r.verified).toBe(false);
     expect(r.summary).toContain("Unverified");
+  });
+
+  it("lists files the language server could not check as not verified, without calling them errors", async () => {
+    const gap = (file: string, message: string) => ({ file, message, severity: "warning" as const, rule: UNCHECKED });
+    const run = (found: Awaited<ReturnType<NonNullable<Parameters<typeof runChecks>[0]["diagnostics"]>>>) =>
+      runChecks({ commands: { sources: {} }, exec: fakeExec(() => ({})).exec, cwd: "/r", phase: "fast", touched: [{ path: "a.ts", created: false }], diagnostics: async () => found });
+    const one = await run([gap("a.ts", "the language server did not answer in time")]);
+    expect(one.checks[0]).toMatchObject({ kind: "diagnostics", ok: true, errors: [] }); // not a problem in the code
+    expect(one.unverified).toContain("the language server could not check 1 file: a.ts (the language server did not answer in time)");
+    const many = await run([gap("a.ts", "x"), gap("b.ts", "x"), gap("c.ts", "x"), gap("d.ts", "x"), gap("e.ts", "x")]);
+    expect(many.unverified.find((u) => u.startsWith("the language server"))).toBe("the language server could not check 5 files: a.ts (x), b.ts (x), c.ts (x), and 2 more");
+    // a real error next to a gap is still an error, and an ordinary warning is not a gap
+    const mixed = await run([{ message: "bad", severity: "error", file: "a.ts", line: 1 }, { message: "style", severity: "warning", file: "a.ts", rule: "style" }]);
+    expect(mixed.checks[0]).toMatchObject({ ok: false });
+    expect(mixed.unverified.some((u) => u.startsWith("the language server"))).toBe(false);
   });
 
   it("includes LSP diagnostics as a check", async () => {

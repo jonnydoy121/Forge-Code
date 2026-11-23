@@ -1,7 +1,7 @@
 // Language-server errors for the files a run touched, for the verification report's "LSP diagnostics" check.
 // A file the editor has open already has markers; any other file (the agent edited it, the developer never opened it) is
 // asked of the language server directly, so its errors are not silently missed.
-import type { StructuredError } from "@forge/verify";
+import { UNCHECKED, type StructuredError } from "@forge/verify";
 import type { CheckResult } from "./diagnosticsTool";
 
 const MAX_FILES = 20;
@@ -16,6 +16,8 @@ export interface Sources {
   /** Ask the language server; absent when this workspace has none (an isolated thread). */
   check?: (rel: string, text: string) => Promise<CheckResult>;
 }
+
+const gap = (file: string, message: string): StructuredError => ({ file, message, severity: "warning", rule: UNCHECKED });
 
 export async function collectErrors(s: Sources): Promise<StructuredError[]> {
   const out: StructuredError[] = [];
@@ -34,7 +36,8 @@ export async function collectErrors(s: Sources): Promise<StructuredError[]> {
           const text = await s.read(rel);
           if (text === null) return []; // deleted by the run: nothing left to check
           const r = await check(rel, text);
-          if (r.status !== "ok") return []; // no server for this file type, or it did not answer: nothing to claim either way
+          if (r.status === "timeout") return [gap(rel, "the language server did not answer in time")];
+          if (r.status === "no-server") return r.unsupported ? [] : [gap(rel, "the language server is not available")]; // a type with no server at all is not worth mentioning
           return r.diagnostics
             .filter((d) => (d.severity ?? 1) === 1)
             .map((d) => ({ file: rel, line: d.range.start.line + 1, col: d.range.start.character + 1, rule: d.code !== undefined ? String(d.code) : undefined, message: d.message.split("\n")[0]!, severity: "error" as const }));
@@ -44,6 +47,7 @@ export async function collectErrors(s: Sources): Promise<StructuredError[]> {
       }),
     );
     out.push(...found.flat());
+    for (const rel of unopened.slice(MAX_FILES)) out.push(gap(rel, `more than ${MAX_FILES} files changed`));
   }
   return out;
 }

@@ -29,10 +29,15 @@ describe("collectErrors", () => {
     expect(errors.map((e) => e.message)).toEqual(["real", "no severity means error"]);
   });
 
-  it("claims nothing for files it could not check: no server, a slow server, or an unreadable file", async () => {
-    const results: Record<string, CheckResult> = { "a.md": { status: "no-server", reason: "none" }, "b.ts": { status: "timeout" }, "c.ts": { status: "ok", diagnostics: [diag("c is broken", 0, 0)] } };
+  it("says nothing for a type with no language server, and nothing for a file that is gone, but flags a server that is slow or unavailable", async () => {
+    const results: Record<string, CheckResult> = {
+      "a.md": { status: "no-server", reason: "no language server for markdown", unsupported: true },
+      "b.ts": { status: "timeout" },
+      "c.ts": { status: "ok", diagnostics: [diag("c is broken", 0, 0)] },
+      "d.py": { status: "no-server", reason: "not installed" },
+    };
     const errors = await collectErrors({
-      files: ["a.md", "b.ts", "gone.ts", "deleted.ts", "c.ts"],
+      files: ["a.md", "b.ts", "gone.ts", "deleted.ts", "c.ts", "d.py"],
       open: () => null,
       read: async (rel) => {
         if (rel === "gone.ts") throw new Error("ENOENT");
@@ -41,7 +46,12 @@ describe("collectErrors", () => {
       },
       check: async (rel) => results[rel]!,
     });
-    expect(errors.map((e) => `${e.file}: ${e.message}`)).toEqual(["c.ts: c is broken"]);
+    expect(errors.map((e) => `${e.severity} ${e.file}: ${e.message}`)).toEqual([
+      "warning b.ts: the language server did not answer in time",
+      "error c.ts: c is broken",
+      "warning d.py: the language server is not available",
+    ]);
+    expect(errors.filter((e) => e.rule === "unchecked").map((e) => e.file)).toEqual(["b.ts", "d.py"]); // the marker the report reads
   });
 
   it("does nothing extra when there is no language server to ask (an isolated thread)", async () => {
@@ -54,7 +64,7 @@ describe("collectErrors", () => {
     let peak = 0;
     const asked: string[] = [];
     const files = Array.from({ length: 30 }, (_, i) => `f${i}.ts`);
-    await collectErrors({
+    const out = await collectErrors({
       files,
       open: () => null,
       read: async () => "x",
@@ -68,6 +78,7 @@ describe("collectErrors", () => {
       },
     });
     expect(asked).toHaveLength(20);
+    expect(out.filter((e) => e.rule === "unchecked").map((e) => e.file)).toEqual(files.slice(20)); // the other ten are reported as not checked
     expect(peak).toBeGreaterThan(1);
   });
 });

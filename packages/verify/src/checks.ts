@@ -81,6 +81,9 @@ async function runOne(kind: CheckKind, command: string, o: RunChecksOptions): Pr
   };
 }
 
+/** A `diagnostics` entry with this rule is not a problem in the code: it says the file could not be checked, and why. */
+export const UNCHECKED = "unchecked";
+
 export async function runChecks(o: RunChecksOptions): Promise<VerificationReport> {
   const files = o.touched.map((t) => t.path);
   const checks: CheckResult[] = [];
@@ -102,8 +105,15 @@ export async function runChecks(o: RunChecksOptions): Promise<VerificationReport
   await scoped("typecheck", c.typecheck, "typecheck");
 
   if (o.diagnostics && files.length) {
-    const errs = (await o.diagnostics(files)).filter((e) => e.severity === "error");
+    const found = await o.diagnostics(files);
+    const errs = found.filter((e) => e.severity === "error");
     checks.push({ kind: "diagnostics", command: "LSP diagnostics", ok: errs.length === 0, durationMs: 0, errors: errs.slice(0, 40), omitted: Math.max(0, errs.length - 40) });
+    // Files the language server could not check (not installed, too slow): "no errors" would say more than is known.
+    const gaps = found.filter((e) => e.severity === "warning" && e.rule === UNCHECKED);
+    if (gaps.length) {
+      const shown = gaps.slice(0, 3).map((g) => `${g.file} (${g.message})`);
+      unverified.push(`the language server could not check ${gaps.length} file${gaps.length === 1 ? "" : "s"}: ${shown.join(", ")}${gaps.length > 3 ? `, and ${gaps.length - 3} more` : ""}`);
+    }
   }
 
   // Tests: related tests first; the full suite only for the final check.

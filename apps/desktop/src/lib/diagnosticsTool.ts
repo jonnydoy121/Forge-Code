@@ -3,7 +3,8 @@ import type { RegisteredTool } from "@forge/tool-host";
 import type { Diagnostic } from "./lspClient";
 import type { FileCheck } from "./diagnosticsTracker";
 
-export type CheckResult = FileCheck | { status: "no-server"; reason: string };
+/** `unsupported`: no language server exists for this file type at all (markdown, json), as opposed to one that failed to start. */
+export type CheckResult = FileCheck | { status: "no-server"; reason: string; unsupported?: boolean };
 
 const MAX_SHOWN = 40;
 const SEVERITY = { 1: "error", 2: "warning", 3: "info", 4: "hint" } as const;

@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### Verification says what it could not check
+- When the language server cannot check a file the run touched (not installed, or it did not answer in time, or more than 20 files changed), the report now lists it under "Not verified" ("the language server could not check 2 files: a.py (the language server is not available), ..."), instead of staying silent and letting "no errors" say more than is known. It is not counted as an error in the code. File types with no language server at all (markdown, JSON) stay out of it, so docs edits are not noisy. This closes the known limit noted with the unopened-files change.
+- Tests: the report (1), `collectErrors` (updated), plus the 54 existing end-to-end tests.
+
 ### External apps over MCP, and measured cache reuse
 - **Big MCP results are compacted locally** before the model sees them (over 12,000 characters): JSON keeps the top level and the first items of each array with every cut counted, other text keeps its beginning and end, a note says what was done. A failing call still fails, with its error compacted the same way. Before, an MCP result went to the model whole and a scene dump could fill the context in one call.
 - **Errors from external (MCP) tools count toward escalation**: a step in which one returned an error is a failed attempt like a failed check (builder first, architect second). Permission denials, hook blocks and built-in tool failures do not count.

@@ -101,8 +101,8 @@ export class LspManager {
   }
 
   /** What the language server says about `text` as the file `path` (open in the editor or not), for the agent's `diagnostics` tool. */
-  async check(path: string, language: string, text: string): Promise<FileCheck | { status: "no-server"; reason: string }> {
-    if (!serverKeyFor(language)) return { status: "no-server", reason: `no language server is set up for ${language} files (TypeScript, JavaScript and Python are covered)` };
+  async check(path: string, language: string, text: string): Promise<FileCheck | { status: "no-server"; reason: string; unsupported?: boolean }> {
+    if (!serverKeyFor(language)) return { status: "no-server", unsupported: true, reason: `no language server is set up for ${language} files (TypeScript, JavaScript and Python are covered)` };
     const s = await this.ensure(language);
     if (!s) return { status: "no-server", reason: "the language server is not available (not installed, or it failed to start)" };
     const uri = pathToUri(path);
