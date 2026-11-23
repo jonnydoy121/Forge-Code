@@ -25,7 +25,7 @@ fn mock_server() -> (String, Arc<AtomicUsize>) {
                     let n = s.read(&mut buf).unwrap_or(0);
                     data.extend_from_slice(&buf[..n]);
                     let text = String::from_utf8_lossy(&data).to_string();
-                    let done = text.split_once("\r\n\r\n").map_or(false, |(h, b)| {
+                    let done = text.split_once("\r\n\r\n").is_some_and(|(h, b)| {
                         let want = h.to_lowercase().split("content-length:").nth(1).and_then(|r| r.trim().split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse::<usize>().ok())).unwrap_or(0);
                         b.len() >= want
                     });
@@ -78,7 +78,7 @@ fn neural_embeddings_find_code_by_meaning_and_the_lexical_fallback_cannot() {
     let lexical_db = tempfile::tempdir().unwrap();
     let lexical = Index::open(r.path(), &lexical_db.path().join("a.db")).unwrap();
     lexical.build(&|_| {}).unwrap();
-    assert!(lexical.semantic_search(q, 1).first().map_or(true, |h| !h.file.ends_with("auth.ts")), "lexical cannot match by meaning");
+    assert!(lexical.semantic_search(q, 1).first().is_none_or(|h| !h.file.ends_with("auth.ts")), "lexical cannot match by meaning");
 
     let neural_db = tempfile::tempdir().unwrap();
     let (url, _) = mock_server();

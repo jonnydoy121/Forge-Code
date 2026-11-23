@@ -76,7 +76,14 @@ fn spec(lang: &str) -> Option<Spec> {
         "csharp" => Spec {
             name: "csharp",
             lang: tree_sitter_c_sharp::LANGUAGE.into(),
-            defs: &[("class_declaration", "class"), ("interface_declaration", "interface"), ("struct_declaration", "struct"), ("enum_declaration", "enum"), ("method_declaration", "method"), ("namespace_declaration", "namespace")],
+            defs: &[
+                ("class_declaration", "class"),
+                ("interface_declaration", "interface"),
+                ("struct_declaration", "struct"),
+                ("enum_declaration", "enum"),
+                ("method_declaration", "method"),
+                ("namespace_declaration", "namespace"),
+            ],
         },
         "c" => Spec { name: "c", lang: tree_sitter_c::LANGUAGE.into(), defs: &[("function_definition", "function"), ("struct_specifier", "struct"), ("enum_specifier", "enum")] },
         "cpp" => Spec {
@@ -172,7 +179,13 @@ pub fn parse(path: &str, content: &str) -> Parsed {
                 if matches!(val.kind(), "arrow_function" | "function_expression" | "function") {
                     def_name_nodes.insert(name.id());
                     let decl = n.parent().unwrap_or(n);
-                    out.symbols.push(Symbol { name: text(name, src).to_string(), kind: "function".into(), line: n.start_position().row as u32 + 1, end_line: n.end_position().row as u32 + 1, signature: signature(decl, src) });
+                    out.symbols.push(Symbol {
+                        name: text(name, src).to_string(),
+                        kind: "function".into(),
+                        line: n.start_position().row as u32 + 1,
+                        end_line: n.end_position().row as u32 + 1,
+                        signature: signature(decl, src),
+                    });
                     def_nodes.push((decl.start_byte(), decl.end_byte()));
                 }
             }

@@ -76,19 +76,17 @@ fn large_repo_meets_targets() {
     println!("repo_map: {} bytes in {d_map:?}", map.len());
 
     // Incremental re-index of a saved file.
-    let target_owned = idx
-        .grep("createProgram", None, 50)
-        .unwrap()
-        .into_iter()
-        .map(|h| h.file)
-        .find(|f| f.ends_with(".ts") || f.ends_with(".go"))
-        .expect("a ts/go file mentioning createProgram");
+    let target_owned = idx.grep("createProgram", None, 50).unwrap().into_iter().map(|h| h.file).find(|f| f.ends_with(".ts") || f.ends_with(".go")).expect("a ts/go file mentioning createProgram");
     let target = target_owned.as_str();
-    let probe = if target.ends_with(".go") { "
+    let probe = if target.ends_with(".go") {
+        "
 func forgePerfProbe() int { return 1 }
-" } else { "
+"
+    } else {
+        "
 export function forgePerfProbe() { return 1; }
-" };
+"
+    };
     let path = root.join(target);
     let original = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, format!("{original}{probe}")).unwrap();

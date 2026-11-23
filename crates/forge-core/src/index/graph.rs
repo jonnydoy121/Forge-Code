@@ -32,7 +32,11 @@ fn normalize(path: &str) -> String {
 }
 
 fn join(dir: &str, rel: &str) -> String {
-    if dir.is_empty() { normalize(rel) } else { normalize(&format!("{dir}/{rel}")) }
+    if dir.is_empty() {
+        normalize(rel)
+    } else {
+        normalize(&format!("{dir}/{rel}"))
+    }
 }
 
 /// Resolve an import specifier to repo files. Best effort and conservative: unresolved specs yield nothing.
@@ -92,11 +96,9 @@ pub fn resolve_import(lang: &str, from: &str, spec: &str, paths: &HashSet<String
             let last = format!("/{}.{ext}", spec.rsplit('.').next().unwrap_or(spec));
             paths.iter().filter(|p| p.ends_with(&suffix) || (lang == "csharp" && p.ends_with(&last))).take(1).cloned().collect()
         }
-        "go" => dirs
-            .iter()
-            .filter(|(d, _)| d.as_str() == spec || d.ends_with(&format!("/{spec}")))
-            .flat_map(|(_, files)| files.iter().filter(|f| f.ends_with(".go") && !f.ends_with("_test.go")).take(20).cloned())
-            .collect(),
+        "go" => {
+            dirs.iter().filter(|(d, _)| d.as_str() == spec || d.ends_with(&format!("/{spec}"))).flat_map(|(_, files)| files.iter().filter(|f| f.ends_with(".go") && !f.ends_with("_test.go")).take(20).cloned()).collect()
+        }
         _ => vec![],
     }
 }

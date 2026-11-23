@@ -35,6 +35,20 @@ jobs:
             echo "::error title=cargo test failed::$msg"
           fi
           exit $code
+      - name: rustfmt and clippy
+        shell: bash
+        run: |
+          set +e
+          cargo fmt --all -- --check > lint-rust.log 2>&1
+          fmt=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> lint-rust.log 2>&1
+          clippy=$?
+          if [ "$fmt" != "0" ] || [ "$clippy" != "0" ]; then
+            # Public annotations carry the summary (job logs need authentication to read).
+            msg=$(grep -E "^(error|warning)|^Diff in|-->" lint-rust.log | head -c 3500 | paste -sd '|' -)
+            echo "::error title=rustfmt or clippy failed::$msg"
+            exit 1
+          fi
       - run: npm run build
       - run: npx playwright install --with-deps chromium
         working-directory: apps/desktop

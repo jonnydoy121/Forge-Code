@@ -196,7 +196,11 @@ mod win {
             .stderr(std::process::Stdio::piped())
             .output()
             .map_err(|e| format!("appcontainer unavailable: icacls: {e}"))?;
-        if out.status.success() { Ok(()) } else { Err(format!("appcontainer unavailable: could not grant access to {}: {}", dir.display(), String::from_utf8_lossy(&out.stderr))) }
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!("appcontainer unavailable: could not grant access to {}: {}", dir.display(), String::from_utf8_lossy(&out.stderr)))
+        }
     }
 
     fn drain(mut f: std::fs::File, cap: usize) -> std::thread::JoinHandle<String> {
@@ -319,8 +323,8 @@ mod win {
             let started = Instant::now();
             ResumeThread(pi.hThread);
 
-            let out = drain(std::fs::File::from_raw_handle(out_r as *mut c_void), max_output);
-            let errh = drain(std::fs::File::from_raw_handle(err_r as *mut c_void), max_output);
+            let out = drain(std::fs::File::from_raw_handle(out_r), max_output);
+            let errh = drain(std::fs::File::from_raw_handle(err_r), max_output);
             let wait = WaitForSingleObject(pi.hProcess, timeout.as_millis().min(u32::MAX as u128 - 1) as u32);
             let timed_out = wait == WAIT_TIMEOUT;
             if timed_out {
@@ -332,7 +336,11 @@ mod win {
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
             CloseHandle(job); // kills anything the command left running
-            Ok((ExecResult { code: if timed_out { None } else { Some(code as i32) }, stdout: out.join().unwrap_or_default(), stderr: errh.join().unwrap_or_default(), timed_out, millis: started.elapsed().as_millis() }, granted, warnings))
+            Ok((
+                ExecResult { code: if timed_out { None } else { Some(code as i32) }, stdout: out.join().unwrap_or_default(), stderr: errh.join().unwrap_or_default(), timed_out, millis: started.elapsed().as_millis() },
+                granted,
+                warnings,
+            ))
         }
     }
 }

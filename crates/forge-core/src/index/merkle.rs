@@ -89,7 +89,11 @@ fn collect(node: &Node, prefix: &str, out: &mut Vec<String>) {
 }
 
 fn join(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() { name.to_string() } else { format!("{prefix}/{name}") }
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}/{name}")
+    }
 }
 
 fn walk(old: Option<&Node>, new: Option<&Node>, path: &str, d: &mut Diff) {

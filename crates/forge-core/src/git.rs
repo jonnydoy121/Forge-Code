@@ -12,11 +12,7 @@ pub struct GitOutput {
 }
 
 fn valid_branch(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 100
-        && !name.starts_with('-')
-        && !name.contains("..")
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+    !name.is_empty() && name.len() <= 100 && !name.starts_with('-') && !name.contains("..") && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
 }
 
 /// Thread branches: `forge/<name>`. Only these may be merged or deleted from the UI.
@@ -36,7 +32,15 @@ fn valid_worktree_path(root: &Path, path: &str) -> bool {
 pub fn run(root: &Path, args: &[String]) -> Result<GitOutput, String> {
     let a: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let allowed = match a.as_slice() {
-        ["status", "--porcelain"] | ["diff", "--stat"] | ["diff"] | ["diff", "--cached"] | ["rev-parse", "--abbrev-ref", "HEAD"] | ["rev-parse", "--is-inside-work-tree"] | ["rev-parse", "HEAD"] | ["rev-parse", "--git-path", "info/exclude"] | ["add", "-A"] => true,
+        ["status", "--porcelain"]
+        | ["diff", "--stat"]
+        | ["diff"]
+        | ["diff", "--cached"]
+        | ["rev-parse", "--abbrev-ref", "HEAD"]
+        | ["rev-parse", "--is-inside-work-tree"]
+        | ["rev-parse", "HEAD"]
+        | ["rev-parse", "--git-path", "info/exclude"]
+        | ["add", "-A"] => true,
         ["checkout", "-b", name] => valid_branch(name),
         ["commit", "-m", msg] => !msg.trim().is_empty(),
         ["log", "--oneline", "-n", n] => n.parse::<u32>().map(|n| n <= 50).unwrap_or(false),
@@ -115,20 +119,34 @@ mod tests {
         let wt = wt_path(d.path(), "t2");
         assert!(run(d.path(), &s(&["worktree", "add", "-b", "forge/t2", &wt, "HEAD"])).unwrap().ok);
         // The thread edits and commits inside its worktree; the main checkout is untouched.
-        std::fs::write(Path::new(&wt).join("a.txt"), "two
-").unwrap();
-        std::fs::write(Path::new(&wt).join("new.txt"), "added
-").unwrap();
-        assert_eq!(std::fs::read_to_string(d.path().join("a.txt")).unwrap(), "one
-");
+        std::fs::write(
+            Path::new(&wt).join("a.txt"),
+            "two
+",
+        )
+        .unwrap();
+        std::fs::write(
+            Path::new(&wt).join("new.txt"),
+            "added
+",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("a.txt")).unwrap(),
+            "one
+"
+        );
         assert!(run(Path::new(&wt), &s(&["add", "-A"])).unwrap().ok);
         assert!(run(Path::new(&wt), &s(&["commit", "-m", "thread work"])).unwrap().ok);
         let stat = run(d.path(), &s(&["diff", "--stat", "HEAD...forge/t2"])).unwrap().stdout;
         assert!(stat.contains("a.txt") && stat.contains("new.txt"), "{stat}");
         // Merge into main, then remove the worktree and branch.
         assert!(run(d.path(), &s(&["merge", "--no-ff", "-m", "Merge thread t2", "forge/t2"])).unwrap().ok);
-        assert_eq!(std::fs::read_to_string(d.path().join("a.txt")).unwrap(), "two
-");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("a.txt")).unwrap(),
+            "two
+"
+        );
         assert!(d.path().join("new.txt").exists());
         assert!(run(d.path(), &s(&["worktree", "remove", "--force", &wt])).unwrap().ok);
         assert!(run(d.path(), &s(&["branch", "-D", "forge/t2"])).unwrap().ok);
@@ -140,19 +158,30 @@ mod tests {
         let d = repo();
         let wt = wt_path(d.path(), "t3");
         run(d.path(), &s(&["worktree", "add", "-b", "forge/t3", &wt, "HEAD"])).unwrap();
-        std::fs::write(Path::new(&wt).join("a.txt"), "thread
-").unwrap();
+        std::fs::write(
+            Path::new(&wt).join("a.txt"),
+            "thread
+",
+        )
+        .unwrap();
         run(Path::new(&wt), &s(&["add", "-A"])).unwrap();
         run(Path::new(&wt), &s(&["commit", "-m", "t"])).unwrap();
-        std::fs::write(d.path().join("a.txt"), "main
-").unwrap(); // the developer changed the same line meanwhile
+        std::fs::write(
+            d.path().join("a.txt"),
+            "main
+",
+        )
+        .unwrap(); // the developer changed the same line meanwhile
         run(d.path(), &s(&["add", "-A"])).unwrap();
         run(d.path(), &s(&["commit", "-m", "main change"])).unwrap();
         let merged = run(d.path(), &s(&["merge", "--no-ff", "-m", "m", "forge/t3"])).unwrap();
         assert!(!merged.ok, "same-line edits must conflict");
         assert!(run(d.path(), &s(&["merge", "--abort"])).unwrap().ok);
-        assert_eq!(std::fs::read_to_string(d.path().join("a.txt")).unwrap(), "main
-");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("a.txt")).unwrap(),
+            "main
+"
+        );
         assert_eq!(run(d.path(), &s(&["status", "--porcelain"])).unwrap().stdout.trim(), "");
     }
 
@@ -167,15 +196,15 @@ mod tests {
             s(&["worktree", "add", "-b", "forge/x", &outside, "HEAD"]),
             s(&["worktree", "add", "-b", "forge/x", &escape, "HEAD"]),
             s(&["worktree", "add", "-b", "forge/x", &nested, "HEAD"]),
-            s(&["worktree", "add", "-b", "main", &ok, "HEAD"]),            // not a thread branch
-            s(&["worktree", "add", "-b", "forge/a/b", &ok, "HEAD"]),       // no nesting
+            s(&["worktree", "add", "-b", "main", &ok, "HEAD"]),      // not a thread branch
+            s(&["worktree", "add", "-b", "forge/a/b", &ok, "HEAD"]), // no nesting
             s(&["worktree", "add", "-b", "forge/x", &ok, "some-other-commit"]),
             s(&["worktree", "add", "--force", "-b", "forge/x", &ok, "HEAD"]),
             s(&["worktree", "remove", "--force", &outside]),
             s(&["worktree", "remove", &ok]),
             s(&["branch", "-D", "main"]),
             s(&["branch", "-d", "forge/x"]),
-            s(&["merge", "forge/x"]),                                      // must be --no-ff with a message
+            s(&["merge", "forge/x"]), // must be --no-ff with a message
             s(&["merge", "--no-ff", "-m", "m", "main"]),
             s(&["merge", "--no-ff", "-m", "  ", "forge/x"]),
             s(&["merge", "--no-ff", "-m", "m", "--strategy=ours"]),

@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Cleanup
+- **Dead code removed** (found by listing every export that is referenced nowhere, tests included): `linePort` (superseded by the multiplexed client), `parseLines` (for an Ollama API the app does not use), `isMonacoLoaded`, and the `HookConfig` type.
+- **Rust is lint-clean.** `cargo clippy --workspace --all-targets -- -D warnings` now passes (about a dozen style warnings fixed: a named type for the hashed-file tuple, `is_multiple_of`, `is_some_and`, redundant pointer casts, and my pipelined index writer's closure now named instead of called where it is declared). The cosine loop and byte decoder keep `chunks_exact`, the form measured in `docs/PERFORMANCE.md`, with an explained `allow` rather than a rewrite of verified-fast code.
+- **`rustfmt.toml`** (`max_width = 220`, matching how the code is written) and a formatting pass: 15 files, mostly import order. The default rustfmt settings would have rewrapped 26 files (2,181 added lines), so they are not used.
+- **CI now checks rustfmt and clippy** on Windows, macOS and Linux, so this stays clean.
+- `npm audit` for the shipped dependencies: 0 vulnerabilities.
+
 ### Claude on your Claude plan (no API key)
 - **"Claude plan"** appears in the mode list when Claude Code is installed and signed in with a Claude account, with no config file. Forge drives the official Claude Code client over ACP; your login never passes through Forge (it only runs `claude auth status`). Its edits go to the review pane, commands and out-of-project reads ask first, and the usual start-of-agent prompt appears. Settings > Claude plan shows the status in plain words (signed in, not signed in, not installed, or a non-subscription login that would bill that account) with a Check again button. A `claude` entry in `.forge/acp.json` replaces the built-in one.
 - Honest about where code goes: the privacy badge says "remote" while an external agent is selected, and **local-only mode hides Claude**.

@@ -24,8 +24,6 @@ export function preloadMonaco(): void {
   else setTimeout(() => void loadMonaco(), 1500);
 }
 
-export const isMonacoLoaded = () => engine !== null;
-
 export const getDoc = (path: string) => engine?.getDoc(path);
 export const openDoc = async (path: string) => (await loadMonaco()).openDoc(path);
 export const disposeDoc = (path: string) => engine?.disposeDoc(path);

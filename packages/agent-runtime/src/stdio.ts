@@ -8,24 +8,6 @@ import { serveRuntime, type Port } from "./remote";
 
 type Subscribe = (onLine: (line: string) => void) => void;
 
-/** A Port over line I/O: `write` sends one line, `subscribe` delivers incoming lines. One session per connection. */
-export function linePort(write: (line: string) => void, subscribe: Subscribe, onClose: () => void = () => {}): Port {
-  const port: Port = {
-    onmessage: null,
-    postMessage: (m) => write(JSON.stringify(m)),
-    close: onClose,
-  };
-  subscribe((line) => {
-    if (!line.trim()) return;
-    try {
-      port.onmessage?.({ data: JSON.parse(line) });
-    } catch {
-      /* a garbled line (stray log output) is ignored rather than killing the session */
-    }
-  });
-  return port;
-}
-
 /** Split arbitrary stream chunks into lines. */
 export function lineSplitter(onLine: (line: string) => void) {
   let buf = "";

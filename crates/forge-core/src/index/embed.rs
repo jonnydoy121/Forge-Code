@@ -90,6 +90,8 @@ impl Embedder for HashEmbedder {
 
 /// Dot product (vectors are unit length, so this is the cosine). Eight independent accumulators let the compiler use
 /// SIMD: a plain `.sum()` of floats must add in order, which blocks vectorisation.
+// `chunks_exact` is the form measured in docs/PERFORMANCE.md (eight independent accumulators the compiler can vectorise); kept as it is.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
     let (a, b) = (&a[..n], &b[..n]);
@@ -113,6 +115,7 @@ pub fn to_bytes(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn from_bytes(b: &[u8]) -> Vec<f32> {
     b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
 }

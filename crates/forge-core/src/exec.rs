@@ -114,13 +114,7 @@ fn run_inner(command: &str, cwd: &Path, timeout: Duration, env: &[(String, Strin
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    Ok(ExecResult {
-        code: status.and_then(|s| s.code()),
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
-        timed_out,
-        millis: started.elapsed().as_millis(),
-    })
+    Ok(ExecResult { code: status.and_then(|s| s.code()), stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default(), timed_out, millis: started.elapsed().as_millis() })
 }
 
 #[cfg(test)]

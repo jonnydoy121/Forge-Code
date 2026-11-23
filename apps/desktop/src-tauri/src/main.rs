@@ -64,8 +64,13 @@ struct ExecOut {
 #[tauri::command]
 async fn run_command(cwd: String, command: String, timeout_ms: u64, env: Vec<(String, String)>) -> Result<ExecOut, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        forge_core::exec::run_shell(&command, Path::new(&cwd), std::time::Duration::from_millis(timeout_ms), &env, 2_000_000)
-            .map(|r| ExecOut { code: r.code, stdout: r.stdout, stderr: r.stderr, timed_out: r.timed_out, millis: r.millis as u64 })
+        forge_core::exec::run_shell(&command, Path::new(&cwd), std::time::Duration::from_millis(timeout_ms), &env, 2_000_000).map(|r| ExecOut {
+            code: r.code,
+            stdout: r.stdout,
+            stderr: r.stderr,
+            timed_out: r.timed_out,
+            millis: r.millis as u64,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -95,7 +100,16 @@ fn mode_name(m: forge_core::sandbox::Mode) -> &'static str {
 async fn sandbox_run(cwd: String, command: String, timeout_ms: u64, toolchain_read: bool) -> Result<SandboxOut, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let o = forge_core::sandbox::run(&command, Path::new(&cwd), std::time::Duration::from_millis(timeout_ms), 2_000_000, &forge_core::sandbox::Options { toolchain_read })?;
-        Ok(SandboxOut { code: o.result.code, stdout: o.result.stdout, stderr: o.result.stderr, timed_out: o.result.timed_out, millis: o.result.millis as u64, mode: mode_name(o.mode), granted: o.granted, warnings: o.warnings })
+        Ok(SandboxOut {
+            code: o.result.code,
+            stdout: o.result.stdout,
+            stderr: o.result.stderr,
+            timed_out: o.result.timed_out,
+            millis: o.result.millis as u64,
+            mode: mode_name(o.mode),
+            granted: o.granted,
+            warnings: o.warnings,
+        })
     })
     .await
     .map_err(|e| e.to_string())?

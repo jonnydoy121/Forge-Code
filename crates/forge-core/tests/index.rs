@@ -180,10 +180,11 @@ fn watcher_reindexes_saved_files_automatically() {
     let (repo, _d, idx) = built();
     let idx = std::sync::Arc::new(idx);
     let (tx, rx) = std::sync::mpsc::channel();
-    let _w = idx.watch(move |files| {
-        let _ = tx.send(files);
-    })
-    .unwrap();
+    let _w = idx
+        .watch(move |files| {
+            let _ = tx.send(files);
+        })
+        .unwrap();
     std::thread::sleep(Duration::from_millis(300));
     fs::write(repo.path().join("src/watched.ts"), "export function watchedFn() {}\n").unwrap();
     let files = rx.recv_timeout(Duration::from_secs(5)).expect("watcher should report the new file");

@@ -1,8 +1,8 @@
 //! Forge core services. Phase 1: filesystem helpers and LSP plumbing.
 
-pub mod fs;
 pub mod bg;
 pub mod exec;
+pub mod fs;
 pub mod git;
 pub mod index;
 pub mod lsp;

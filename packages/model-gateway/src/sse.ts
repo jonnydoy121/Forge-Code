@@ -33,22 +33,3 @@ function parseBlock(block: string): SseEvent | null {
   }
   return data.length ? { event, data: data.join("\n") } : null;
 }
-
-/** Parse newline-delimited JSON (Ollama native) into raw lines. */
-export async function* parseLines(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (line) yield line;
-    }
-  }
-  if (buf.trim()) yield buf.trim();
-}

@@ -49,13 +49,7 @@ impl HttpEmbedder {
 
     /// One HTTP request for many inputs: Ollama's /api/embed accepts an array and returns one vector per entry, in order.
     fn request_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
-        let resp: serde_json::Value = self
-            .agent
-            .post(&self.url)
-            .send_json(serde_json::json!({ "model": self.model, "input": texts }))
-            .map_err(|e| e.to_string())?
-            .into_json()
-            .map_err(|e| e.to_string())?;
+        let resp: serde_json::Value = self.agent.post(&self.url).send_json(serde_json::json!({ "model": self.model, "input": texts })).map_err(|e| e.to_string())?.into_json().map_err(|e| e.to_string())?;
         let all = resp["embeddings"].as_array().ok_or("response has no embeddings")?;
         if all.len() != texts.len() {
             return Err(format!("asked for {} embeddings, got {}", texts.len(), all.len()));
@@ -117,7 +111,7 @@ mod tests {
                     let n = s.read(&mut buf).unwrap_or(0);
                     data.extend_from_slice(&buf[..n]);
                     let text = String::from_utf8_lossy(&data).to_string();
-                    let done = text.split_once("\r\n\r\n").map_or(false, |(h, b)| {
+                    let done = text.split_once("\r\n\r\n").is_some_and(|(h, b)| {
                         let want = h.to_lowercase().split("content-length:").nth(1).and_then(|r| r.trim().split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse::<usize>().ok())).unwrap_or(0);
                         b.len() >= want
                     });

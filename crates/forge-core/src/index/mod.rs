@@ -31,7 +31,18 @@ pub fn is_secret_name(name: &str) -> bool {
     if n.ends_with(".env.example") || n.ends_with(".env.sample") {
         return false;
     }
-    n == ".env" || n.starts_with(".env.") || n.ends_with(".pem") || n.ends_with(".key") || n.ends_with(".p12") || n.starts_with("id_rsa") || n.starts_with("id_dsa") || n.starts_with("id_ecdsa") || n.starts_with("id_ed25519") || n.starts_with("credentials") || n == ".npmrc" || n == ".netrc"
+    n == ".env"
+        || n.starts_with(".env.")
+        || n.ends_with(".pem")
+        || n.ends_with(".key")
+        || n.ends_with(".p12")
+        || n.starts_with("id_rsa")
+        || n.starts_with("id_dsa")
+        || n.starts_with("id_ecdsa")
+        || n.starts_with("id_ed25519")
+        || n.starts_with("credentials")
+        || n == ".npmrc"
+        || n == ".netrc"
 }
 
 #[derive(Clone)]
@@ -187,6 +198,9 @@ impl PreparedRow {
         PreparedRow { path: path.to_string(), hash: f.hash.clone(), size: f.size as i64, mtime: f.mtime as i64, data: serde_json::to_string(&f.parsed).unwrap_or_default(), vecs: to_bytes(&flat) }
     }
 }
+
+/// A walked file with its content hash, size and mtime (None when it is binary or unreadable).
+type Hashed = (String, Option<(String, u64, u64)>);
 
 struct Walked {
     rel: String,
@@ -416,7 +430,7 @@ impl Index {
         // Nothing indexed yet (a first index): every file will be parsed anyway, so reading and hashing them all first just
         // to learn that is wasted work. The tree is built from the parsed results instead.
         let cold = self.state.read().unwrap().files.is_empty();
-        let fresh: Vec<(String, Option<(String, u64, u64)>)> = {
+        let fresh: Vec<Hashed> = {
             let st = self.state.read().unwrap();
             let needs: Vec<&Walked> = if cold { Vec::new() } else { walked.iter().filter(|w| st.files.get(&w.rel).map(|f| f.size != w.size || f.mtime != w.mtime).unwrap_or(true)).collect() };
             let n = needs.len();
@@ -425,7 +439,7 @@ impl Index {
                 .map(|w| {
                     let r = std::fs::read(self.abs(&w.rel)).ok().filter(|b| !b[..b.len().min(8192)].contains(&0)).map(|b| (blake3::hash(&b).to_hex().to_string(), w.size, w.mtime));
                     let d = hashed.fetch_add(1, Ordering::Relaxed) + 1;
-                    if d % 2000 == 0 {
+                    if d.is_multiple_of(2000) {
                         progress(Progress { phase: "hash", done: d, total: n });
                     }
                     (w.rel.clone(), r)
@@ -497,7 +511,7 @@ impl Index {
                 }
                 Ok(ms)
             });
-            let produced = (|| -> Result<(), Err> {
+            let mut produce = || -> Result<(), Err> {
                 for batch in changed.chunks(512) {
                     let t = std::time::Instant::now();
                     let results: Vec<(String, FileEntry, PreparedRow)> = {
@@ -508,7 +522,7 @@ impl Index {
                                 let (size, mtime) = *meta.get(rel.as_str())?;
                                 let r = self.process(rel, size, mtime, st.files.get(rel))?;
                                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                                if n % 500 == 0 {
+                                if n.is_multiple_of(500) {
                                     progress(Progress { phase: "parse", done: n, total: changed.len() });
                                 }
                                 let row = PreparedRow::new(rel, &r);
@@ -529,7 +543,8 @@ impl Index {
                     t_insert += t.elapsed().as_millis();
                 }
                 Ok(())
-            })();
+            };
+            let produced = produce();
             drop(tx); // no more batches: let the writer finish
             let write_ms = writer.join().map_err(|_| "the index writer thread panicked".to_string())??;
             produced?;

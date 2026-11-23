@@ -26,17 +26,13 @@ struct LspMsg {
 
 /// Directories searched before PATH: workspace node_modules/.bin, then the repo's (dev builds).
 fn search_dirs(root: &str) -> Vec<PathBuf> {
-    vec![
-        PathBuf::from(root).join("node_modules").join(".bin"),
-        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../node_modules/.bin")),
-    ]
+    vec![PathBuf::from(root).join("node_modules").join(".bin"), PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../node_modules/.bin"))]
 }
 
 #[tauri::command]
 pub fn lsp_start(app: AppHandle, state: State<LspState>, language: String, root: String) -> Result<u32, String> {
     let (name, args) = server_spec(&language).ok_or_else(|| format!("no language server known for {language}"))?;
-    let exe = resolve_command(name, &search_dirs(&root))
-        .ok_or_else(|| format!("{name} not found. Run npm install in the Forge repo or install it on PATH."))?;
+    let exe = resolve_command(name, &search_dirs(&root)).ok_or_else(|| format!("{name} not found. Run npm install in the Forge repo or install it on PATH."))?;
 
     let mut cmd = Command::new(exe);
     cmd.args(args).current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());

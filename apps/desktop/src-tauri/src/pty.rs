@@ -25,9 +25,7 @@ struct PtyData {
 
 #[tauri::command]
 pub fn pty_spawn(app: AppHandle, state: State<PtyState>, cwd: Option<String>, cols: u16, rows: u16) -> Result<u32, String> {
-    let pair = native_pty_system()
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-        .map_err(|e| e.to_string())?;
+    let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
     let shell = if cfg!(windows) { "powershell.exe".to_string() } else { std::env::var("SHELL").unwrap_or("/bin/sh".into()) };
     let mut cmd = CommandBuilder::new(shell);
     if let Some(dir) = cwd {

@@ -103,7 +103,6 @@ export interface ContextStore {
 export type HookEvent =
   | "PreToolUse" | "PostToolUse" | "PostEdit" | "Stop"
   | "PreCompact" | "PostCompact" | "SessionStart";
-export interface HookConfig { event: HookEvent; command: string }
 
 // Agent runtime
 export type AgentEvent =

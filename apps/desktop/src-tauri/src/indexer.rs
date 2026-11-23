@@ -1,6 +1,6 @@
-use forge_core::index::{BuildStats, ChunkHit, Cone, GrepHit, Index, RefHit, Status, SymbolHit};
 use forge_core::index::embed::{Embedder, HashEmbedder};
 use forge_core::index::embed_http::HttpEmbedder;
+use forge_core::index::{ChunkHit, Cone, GrepHit, Index, RefHit, Status, SymbolHit};
 use notify::RecommendedWatcher;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -38,7 +38,7 @@ pub fn index_start(app: AppHandle, state: State<IndexState>, root: String, embed
         let res = bg.build(&|p| {
             let _ = app2.emit("index-progress", p);
         });
-        let _ = app2.emit("index-built", res.as_ref().map(|s: &BuildStats| s.clone()).map_err(|e| e.clone()));
+        let _ = app2.emit("index-built", res.clone().map_err(|e| e.clone()));
         bg.warm(); // after "ready": the first repo map is then instant, and it never delayed the ready signal
     });
     let app3 = app.clone();
