@@ -72,6 +72,7 @@ function repo() {
     "/r/AGENTS.md": "# Repo\nUse pnpm.",
     "/r/CLAUDE.md": "Claude notes",
     "/r/.cursorrules": "Cursor style rules",
+    "/r/.forgerules": "Forge rules: name tests after behaviour.",
     "/r/.cursor/rules/api.mdc": "---\ndescription: API rules\nglobs: [\"server/**\"]\n---\nValidate input.",
     "/r/.github/copilot-instructions.md": "Copilot notes",
     "/r/.forge/rules/react.md": REACT_RULE,
@@ -102,7 +103,7 @@ describe("RuleEngine: sources, scoping and precedence", () => {
 
   it("imports AGENTS.md plus CLAUDE.md, .cursorrules, .cursor/rules, copilot instructions", async () => {
     const n = await names(["README.md"]);
-    for (const x of ["AGENTS.md", "CLAUDE.md", ".cursorrules", ".github/copilot-instructions.md", "always", "User rules"]) expect(n).toContain(x);
+    for (const x of ["AGENTS.md", "CLAUDE.md", ".cursorrules", ".forgerules", ".github/copilot-instructions.md", "always", "User rules"]) expect(n).toContain(x);
     expect(n).not.toContain(".cursor/rules/api.mdc"); // glob rule for server/**
     expect(await names(["server/x.ts"])).toContain(".cursor/rules/api.mdc");
   });

@@ -10,7 +10,7 @@ import { InMemoryCheckpointStore } from "@forge/checkpoints";
 import type { ModelGateway } from "@forge/protocol";
 import { diskFs, promptFs, toolFs } from "./nodefs";
 import { headlessCommandTools } from "./commands";
-import { createSkillTools, expandPrompt, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
+import { RuleEngine, createSkillTools, expandPrompt, loadPrompts, loadSkills, skillsIndex } from "@forge/context-store";
 import { unifiedDiff } from "./format";
 
 export interface Io {
@@ -161,9 +161,18 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
   const userSkills = home ? `${home}/.forge/skills` : undefined;
   const skills = await loadSkills(skillFs, `${root}/.forge/skills`, userSkills);
   const skillTools = skills.length ? createSkillTools({ root, fs: skillFs, skills: () => loadSkills(skillFs, `${root}/.forge/skills`, userSkills) }) : [];
+  // The repo's rules (AGENTS.md, .forgerules, CLAUDE.md, .cursorrules, .forge/rules): a headless run follows them like the app does.
+  // Without an open file, the rules that always apply are the ones that count (scoped ones need a file to match against).
+  const rulesText = RuleEngine.render(await new RuleEngine(skillFs, root).applicable([]));
   const tools = createToolHost({ root, fs: toolFs, tools: o.command === "run" ? [...READ_TOOLS, ...skillTools, ...createEditTools(sink), ...(o.allow.length ? headlessCommandTools(root, o.allow, (l) => void (!o.json && io.err(`  $ ${l}\n`))) : [])] : [...READ_TOOLS, ...skillTools] });
   const runtime = new Runtime({ gateway, tools, provider: "default", model: o.model ?? "scripted", limits: { maxSteps: o.maxSteps, maxCostUsd: o.maxCostUsd, maxSeconds: 900 },
-    sections: skills.length ? () => [{ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) }] : undefined,
+    sections:
+      rulesText || skills.length
+        ? () => [
+            ...(rulesText ? [{ id: "rules", label: "Project rules", priority: 0, text: rulesText }] : []),
+            ...(skills.length ? [{ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) }] : []),
+          ]
+        : undefined,
   });
 
   let answer = "";

@@ -134,6 +134,43 @@ describe("saved prompts", () => {
   });
 });
 
+describe("rules in the CLI", () => {
+  const systemText = (gw: ScriptedGateway) => gw.requests[0]!.messages.filter((m) => m.role === "system").map((m) => m.content).join(" | ");
+
+  it("puts the repo's rules (AGENTS.md, .forgerules and the other rule files) in the model's context, so a headless run follows them", async () => {
+    const dir = project();
+    writeFileSync(`${dir}/AGENTS.md`, "# Repo\nALWAYS-USE-PNPM\n");
+    writeFileSync(`${dir}/.forgerules`, "FORGERULES-NAME-TESTS-AFTER-BEHAVIOUR\n");
+    writeFileSync(`${dir}/.cursorrules`, "CURSOR-STYLE-RULE\n");
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    expect(await runCli(["ask", "what are the rules?"], io(dir, gw).i)).toBe(0);
+    const sys = systemText(gw);
+    for (const rule of ["ALWAYS-USE-PNPM", "FORGERULES-NAME-TESTS-AFTER-BEHAVIOUR", "CURSOR-STYLE-RULE"]) expect(sys).toContain(rule);
+    expect(sys).toContain("Project rules");
+  });
+
+  it("adds nothing when the repo has no rules (and does not fail on the missing rules folders), and the rules also reach a run that edits", async () => {
+    const plain = new ScriptedGateway([[text("ok"), done]]);
+    expect(await runCli(["ask", "hi"], io(project(), plain).i)).toBe(0);
+    expect(systemText(plain)).not.toContain("Project rules");
+
+    const dir = project();
+    writeFileSync(`${dir}/.forgerules`, "RULE-FOR-EDITS\n");
+    const gw = new ScriptedGateway([edit(), [text("done"), done]]);
+    expect(await runCli(["run", "bump b"], io(dir, gw).i)).toBe(0);
+    expect(systemText(gw)).toContain("RULE-FOR-EDITS");
+  });
+
+  it("reads scoped rules from .forge/rules too (the always-on ones)", async () => {
+    const dir = project();
+    mkdirSync(`${dir}/.forge/rules`, { recursive: true });
+    writeFileSync(`${dir}/.forge/rules/style.md`, "---\ndescription: Style\nactivation: always\n---\nSCOPED-ALWAYS-RULE\n");
+    const gw = new ScriptedGateway([[text("ok"), done]]);
+    await runCli(["ask", "hi"], io(dir, gw).i);
+    expect(systemText(gw)).toContain("SCOPED-ALWAYS-RULE");
+  });
+});
+
 describe("skills in the CLI", () => {
   function withSkill() {
     const dir = project();

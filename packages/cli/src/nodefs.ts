@@ -20,10 +20,17 @@ export const diskFs: DiskFs = {
   remove: (p) => rm(p, { force: true }),
 };
 
-/** Saved prompts (.forge/prompts): file names in a folder, and file contents. */
+/** Saved prompts, skills and rules: file names in a folder, and file contents. A folder that does not exist is simply empty (most repos have no .forge/rules). */
 export const promptFs = {
   read: diskFs.read,
-  list: (dir: string) => readdir(dir),
+  list: async (dir: string) => {
+    try {
+      return await readdir(dir);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT" || (e as NodeJS.ErrnoException).code === "ENOTDIR") return [];
+      throw e;
+    }
+  },
 };
 
 /** What the read tools (read_file, ls, grep) see. */

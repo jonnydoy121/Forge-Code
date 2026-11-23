@@ -32,7 +32,8 @@ export interface AppliedRule {
 // Precedence, lowest to highest (section 7.1). Later entries override earlier ones on conflict.
 const RANK: Record<RuleKind, number> = { user: 0, "agents-md": 1, import: 1, "nested-agents-md": 2, scoped: 3 };
 
-const IMPORTS = ["CLAUDE.md", ".cursorrules", ".windsurfrules", ".github/copilot-instructions.md"];
+// `.forgerules` is Forge-Code's own name for a plain-text rules file at the repo root; the others are what other tools use.
+const IMPORTS = [".forgerules", "CLAUDE.md", ".cursorrules", ".windsurfrules", ".github/copilot-instructions.md"];
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
