@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### External apps over MCP, and measured cache reuse
+- **Big MCP results are compacted locally** before the model sees them (over 12,000 characters): JSON keeps the top level and the first items of each array with every cut counted, other text keeps its beginning and end, a note says what was done. A failing call still fails, with its error compacted the same way. Before, an MCP result went to the model whole and a scene dump could fill the context in one call.
+- **Errors from external (MCP) tools count toward escalation**: a step in which one returned an error is a failed attempt like a failed check (builder first, architect second). Permission denials, hook blocks and built-in tool failures do not count.
+- Tests: compactor (7), a real MCP server process behaving like a game-editor bridge (4), the run loop with a real MCP server whose tool fails (3), `pickTier` with tool errors (2). Mutation-checked: the error-bridge test fails when the counting is removed.
+- **Prefix reuse measured** with a real model server (Ollama 7B): 89-92% of the prompt reused from step 2 on, 98% at the start of a run with a different request. `prefix.spec.ts` shows in the real window that the system text and tools are byte-identical across the steps of a run, including after an edit. A ready-to-run Anthropic check (`FORGE_LIVE_ANTHROPIC=1 ANTHROPIC_API_KEY=... npx vitest run packages/agent-runtime/test/cache.live`, a fraction of a cent) is included; I have not run it, so Anthropic's actual cache hits and savings remain unverified.
+- Not run against Unity, Blender or Unreal themselves.
+
 ### Options before code
 - New **Options** button beside Attach (Agent and Plan mode): the main model proposes 2-3 short approaches to the request in the box (title, how it works, files, trade-off, size; no code), shown as cards. **Use option B** then runs the agent on that approach only. Nothing is generated for the options not picked (a real-window test counts the requests: one options call, one run). An unusable reply puts the request back in the box. See `docs/MODEL-ROUTING.md`.
 - Measured with real local models (`options.live.test.ts`): the 7B gave usable options 4 of 4; the 1.5B failed once, on a bare JSON array in a code fence, which exposed a parser bug that is now fixed and tested.

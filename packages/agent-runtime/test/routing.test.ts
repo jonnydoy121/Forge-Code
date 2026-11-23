@@ -46,6 +46,23 @@ describe("pickTier", () => {
     expect(pick({ scout: cfg.scout }, "agent", 0, "complex").tier).toBe("builder");
   });
 
+  it("counts steps where an external tool errored like failed checks: the builder gets one, the architect the second", () => {
+    const withErrors = (failedChecks: number, toolErrors: number) => pickTier(cfg, builder, { mode: "agent", failedChecks, toolErrors });
+    expect(withErrors(0, 1).tier).toBe("builder");
+    const two = withErrors(0, 2);
+    expect(two.tier).toBe("architect");
+    expect(two.reason).toBe("tool calls failed 2 times with the default model, so the architect model takes over");
+    expect(withErrors(1, 1).reason).toContain("checks and tool calls failed 2 times");
+    expect(withErrors(2, 0).reason).toContain("checks failed 2 times"); // the wording for plain check failures is unchanged
+    expect(pickTier({ scout: cfg.scout }, builder, { mode: "agent", failedChecks: 0, toolErrors: 3 }).reason).toContain("no architect model is set");
+  });
+
+  it("gives the scout one attempt on tool errors too", () => {
+    const on = { ...cfg, scoutEdits: true };
+    expect(pickTier(on, builder, { mode: "agent", failedChecks: 0, toolErrors: 0, complexity: "trivial" }).tier).toBe("scout");
+    expect(pickTier(on, builder, { mode: "agent", failedChecks: 0, toolErrors: 1, complexity: "trivial" }).tier).toBe("builder");
+  });
+
   it("lets the scout take simple edits only when that is switched on, and questions always", () => {
     expect(pick(cfg, "agent", 0, "trivial").tier).toBe("builder");
     expect(pick(cfg, "debug", 0, "trivial").tier).toBe("builder");

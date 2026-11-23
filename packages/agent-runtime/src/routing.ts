@@ -54,21 +54,26 @@ export function scoutOrBuilder(cfg: RoutingConfig | undefined, builder: Route): 
 }
 
 /** Which model answers the next request. A pure function of the config, the mode and how the run is going. */
-export function pickTier(cfg: RoutingConfig | undefined, builder: Route, s: { mode: Mode; failedChecks: number; complexity?: Complexity }): TierChoice {
+export function pickTier(cfg: RoutingConfig | undefined, builder: Route, s: { mode: Mode; failedChecks: number; /** steps in which a tool on an external (MCP) server returned an error */ toolErrors?: number; complexity?: Complexity }): TierChoice {
   const base: TierChoice = { tier: "builder", route: builder, reason: "default model" };
   if (!cfg) return base;
   const architect = available(cfg, "architect");
   const scout = available(cfg, "scout");
   const after = cfg.escalateAfter ?? 2;
+  // A failed attempt is a failed verification round or a step in which an external tool (a game editor, a 3D app, anything behind
+  // MCP) came back with an error: the builder gets the first, the architect the second.
+  const toolErrors = s.toolErrors ?? 0;
+  const failed = s.failedChecks + toolErrors;
+  const what = toolErrors === 0 ? "checks" : s.failedChecks === 0 ? "tool calls" : "checks and tool calls";
 
-  if (s.failedChecks >= after) {
-    if (architect) return { tier: "architect", route: architect, reason: `checks failed ${s.failedChecks} times with the default model, so the architect model takes over` };
-    return { ...base, reason: `checks failed ${s.failedChecks} times; no architect model is ${cfg.architect ? "allowed" : "set"}, so the default model keeps trying` };
+  if (failed >= after) {
+    if (architect) return { tier: "architect", route: architect, reason: `${what} failed ${failed} times with the default model, so the architect model takes over` };
+    return { ...base, reason: `${what} failed ${failed} times; no architect model is ${cfg.architect ? "allowed" : "set"}, so the default model keeps trying` };
   }
   if (s.mode === "plan" && (cfg.planWithArchitect ?? true) && architect) return { tier: "architect", route: architect, reason: "plan mode" };
   if (s.complexity === "complex" && architect) return { tier: "architect", route: architect, reason: "the request looks complex" };
   // The scout gets one attempt (no failed check yet), and edits only when allowed.
-  if (s.complexity === "trivial" && scout && s.failedChecks === 0 && s.mode !== "plan" && (s.mode === "ask" || cfg.scoutEdits)) return { tier: "scout", route: scout, reason: "the request looks simple" };
+  if (s.complexity === "trivial" && scout && failed === 0 && s.mode !== "plan" && (s.mode === "ask" || cfg.scoutEdits)) return { tier: "scout", route: scout, reason: "the request looks simple" };
   return base;
 }
 

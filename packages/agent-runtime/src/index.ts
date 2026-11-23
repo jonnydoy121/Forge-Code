@@ -196,6 +196,7 @@ ${summary}` });
     const applied = new Map<string, boolean>(); // workspace-relative path -> created, for edits that reached disk
     let sawPending = false;
     let attempts = 0;
+    let toolErrors = 0; // steps in which an external (MCP) tool returned an error; counts toward escalation like a failed check
     let needsFull = false; // applied edits not yet covered by a passing full run
     let finalReport = false; // verification kept failing: one last tool-less turn to report
     let stopHookRan = false;
@@ -260,7 +261,7 @@ ${summary}` });
       }
       this.lastContext = ctx;
       this.lastEstimate = ctx.totalTokens + toolTokens;
-      const choice = pickTier(deps.routing, { provider: deps.provider, model: deps.model }, { mode: req.mode, failedChecks: attempts, complexity });
+      const choice = pickTier(deps.routing, { provider: deps.provider, model: deps.model }, { mode: req.mode, failedChecks: attempts, toolErrors, complexity });
       if (deps.routing && choice.tier !== lastTier) yield { type: "route", tier: choice.tier, provider: choice.route.provider, model: choice.route.model, reason: choice.reason };
       lastTier = choice.tier;
       deps.audit?.({ kind: "model", name: `${choice.route.provider}/${choice.route.model}`, detail: `${ctx.totalTokens} tokens${deps.routing ? `, ${choice.tier}: ${choice.reason}` : ""}` });
@@ -311,8 +312,11 @@ ${summary}` });
       }
 
       let newlyApplied = false;
+      let externalError = false;
       for (const call of calls) {
         const result = await this.dispatch(req.mode, call, specs.find((s) => s.name === call.name)?.class);
+        // The external app said no (a compile error, a failed command). Not a refusal by the gate or a hook, and not a missing tool.
+        if (call.name.startsWith("mcp__") && !result.ok && !/^(permission |blocked by a PreToolUse|tool .* is not available)/.test(result.output)) externalError = true;
         const findings = call.name === "write_plan" ? [] : detectInjection(result.output);
         if (findings.length) {
           result.output = quarantine(result.output, findings, `the ${call.name} tool`);
@@ -333,6 +337,8 @@ ${summary}` });
         this.history.push({ role: "tool", toolCallId: call.id, content: output });
         yield { type: "tool_result", name: call.name, result: { ...result, output } };
       }
+
+      if (externalError) toolErrors++;
 
       // Fast, scoped checks after every change set that reached disk.
       if (newlyApplied && deps.verify?.enabled()) {

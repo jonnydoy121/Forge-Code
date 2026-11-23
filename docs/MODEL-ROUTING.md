@@ -45,7 +45,34 @@ model, so the architect model takes over."), and the audit log records the model
   mode) which is sent as its own message ahead of the sections that change (repo map, attachments, plan). Cache writes cost 1.25x,
   reads 0.1x (0.05x for Opus 5.5 and Sonnet 5.5). Prefixes under the model's minimum (512 tokens for the 5.5 models) are just not
   cached. OpenAI-compatible providers cache prefixes by themselves; the usage they report is read the same way.
+- **Measured prefix reuse (what makes caching pay).** With a real model server (Ollama, `qwen2.5-coder:7b`, `cache.live.test.ts`), step 2 and later of a run
+  reused 89-92% of the prompt (the whole earlier conversation), and the first request of a run with a *different* prompt reused 98% (only the new
+  message was processed fresh). In the real window, `prefix.spec.ts` checks that the system text and the tools are byte-identical from request to
+  request through a read, an edit and another read, with the repo map in the prompt. Ollama's cache is not Anthropic's, but both only help when the
+  prefix is stable, and ours is.
+- **Anthropic's real savings are still unmeasured by me** (no API key). To check them yourself, one command that spends a fraction of a cent (three
+  requests of about 3,000 prompt tokens on Haiku): `FORGE_LIVE_ANTHROPIC=1 ANTHROPIC_API_KEY=... npx vitest run packages/agent-runtime/test/cache.live`.
+  It fails unless the first request writes to the cache, the later ones read from it, and the third costs less than it would uncached.
 - One API key is kept per provider kind, so two tiers on the same provider with different endpoints share a key.
+
+## External apps over MCP (game and 3D editors, anything with a bridge)
+
+Forge talks to MCP servers, so a Unity, Blender or Unreal bridge is just another server. Two parts of the original proposal were about such apps, and
+both are built in a form that works for any MCP server:
+
+- **Big results are shrunk before the model sees them.** A scene dump or build log can be hundreds of KB; the built-in tools cap their output but an MCP
+  result used to go to the model whole. Now a result over 12,000 characters is compacted locally (no model call, free, deterministic): JSON keeps the top
+  level and the first items of each array, with deep levels and long strings cut and each cut counted ("… 3,990 more items"); other text keeps its
+  beginning and its end (the cause of a failed build is at the end). A note says what was done and to ask again with a narrower query. A failing call
+  still fails, with its error compacted the same way. Tested through a real server process that behaves like such a bridge (a 4,000-object scene, a
+  6,000-line build log, a build that fails).
+- **Errors from the external app count toward escalation.** A step in which an MCP tool returned an error counts as a failed attempt, like a failed check:
+  the builder gets one attempt, the architect the second (and the scout, if it was used, only the first). A permission you denied, a hook block, or a
+  built-in tool failing does not count. Tested with a real MCP server process whose tool fails.
+
+Not done: summarising a scene with a small model (the proposal's other option). A local compaction is free and predictable, a model summary can lose the
+one detail that matters; if you want it, the scout is the place for it.
+**Not run against Unity, Blender or Unreal themselves**, only against mock servers that behave like them.
 
 ## Options before code
 
@@ -98,11 +125,11 @@ a benchmark.
 |---|---|
 | Three tiers, scout / builder / architect | Built |
 | Intent triage by a tiny model | Built, opt-in; the free wording guess is the default because a model call before every message costs latency |
-| Context compression | Already there: ranked repo map, token-budgeted context, compaction (now run by the scout), sub-agents with fresh contexts. The Unity/Blender scene summaries do not apply to a code editor |
+| Context compression | Already there for code: ranked repo map, token-budgeted context, compaction (run by the scout), sub-agents with fresh contexts. For external apps over MCP: big results are compacted locally, see above |
 | 2-3 options and a preview before generating code | See "Options before code" below |
 | Diff-only execution | Already there (`edit_file` search/replace) |
-| Escalate to the architect after two failures | Built, driven by failing checks rather than errors from a Unity/Blender bridge |
-| Prompt caching | Built for Anthropic; OpenAI-compatible usage is read |
+| Escalate to the architect after two failures | Built, driven by failing checks and by errors from external (MCP) tools |
+| Prompt caching | Built for Anthropic; OpenAI-compatible usage is read. Prefix reuse measured on a real server; Anthropic savings not measured (a one-command check is provided) |
 | Local models for zero-cost chores | Built: summaries, commit messages and triage can run on Ollama or LM Studio (as an OpenAI-compatible server) |
 | Never pre-generate the options you do not pick | Nothing pre-generates; no options step exists |
 
@@ -110,7 +137,8 @@ a benchmark.
 
 - **Hosted providers are not verified live.** Routing is tested end to end in the real window against a mock server that records the model each
   request names, and the cache request and usage handling against the documented shapes. Real cache hits and real savings with Anthropic or OpenAI
-  have not been measured (no API key was available). Local Ollama models were measured, see above.
+  have not been measured (no API key was available; see the one-command check above). Local Ollama models were measured, see above.
+- **Unity, Blender and Unreal are untested.** The MCP features are tested against mock servers that behave like such bridges.
 - A small scout is poor at tool use (see the measurements). Leave triage off, or keep the scout to chores, unless yours is good at it.
 - The wording guess is deliberately simple and will misjudge some requests. The escalation to the architect does not depend on it.
 - Once the architect has taken over it keeps the rest of that run, even after the checks pass.

@@ -3,6 +3,9 @@
 
 import { JsonRpcPeer, type LineTransport } from "@forge/rpc";
 import type { RegisteredTool } from "@forge/tool-host";
+import { compactResult } from "./compact";
+
+export * from "./compact";
 
 export const MCP_PROTOCOL_VERSION = "2024-11-05";
 
@@ -77,7 +80,7 @@ const safeName = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
  * Adapt a server's tools to Forge tools. They are `network`-class: an MCP server can do anything (query a database,
  * drive a browser, post to a tracker), so the developer is asked before the first call, like any outward-facing tool.
  */
-export function mcpTools(client: McpClient, serverName: string, tools: McpTool[]): RegisteredTool[] {
+export function mcpTools(client: McpClient, serverName: string, tools: McpTool[], opts: { maxChars?: number } = {}): RegisteredTool[] {
   return tools.map((t) => ({
     spec: {
       name: `mcp__${safeName(serverName)}__${safeName(t.name)}`,
@@ -87,8 +90,10 @@ export function mcpTools(client: McpClient, serverName: string, tools: McpTool[]
     },
     async run(args: Record<string, unknown>) {
       const r = await client.callTool(t.name, args);
-      if (r.isError) throw new Error(r.text || `${t.name} failed`);
-      return r.text || "(the tool returned no text)";
+      // A big result (a scene dump, a build log) would fill the context in one call: shrink it locally and say so.
+      const label = `mcp__${safeName(serverName)}__${safeName(t.name)}`;
+      if (r.isError) throw new Error(compactResult(r.text || `${t.name} failed`, label, opts.maxChars).text);
+      return compactResult(r.text || "(the tool returned no text)", label, opts.maxChars).text;
     },
   }));
 }
