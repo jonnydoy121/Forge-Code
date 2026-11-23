@@ -81,6 +81,24 @@ matches after a restart. Timings on this machine drift by up to about 30% with b
 ### Smaller fixes
 - The UI polled localStorage every second, forever, to notice a settings change. It now listens for a change event.
 
+### Time from pressing Enter to the model request (what every message costs)
+Measured in the real window with a mock model, using `mark()` timestamps (`src/lib/trace.ts`, free unless a test turns it on):
+
+| | ms |
+|---|---|
+| Any message once the agent process is running | **31-37** |
+| First message, first-ever launch of the executable | 310-390 |
+| First message when the process had to be launched again | 59-86 |
+| First message when the input was focused first (pre-warm) | **52** |
+
+The timeline of a cold first message showed the cost is not in our code: context assembly is about 20 ms, the model request leaves
+4 ms after that, and almost everything else is waiting for the runtime process to boot. The standalone executable takes about 21 ms
+to answer once the OS has run it before, but 275+ ms the very first time (the operating system reading and scanning a 100 MB file it
+has never run). A user pays that once per install or update, not per session. Two changes hide the rest: absolute `.exe` paths are
+now launched directly instead of through `cmd.exe` (one process fewer per child, tested), and the shared agent process is started
+when the user focuses the agent input, so it is already running by the time they have typed. An unused pre-started process is
+released after a minute. The warm path (31-37 ms, mostly context assembly) has a regression budget in `latency.spec.ts`.
+
 ### Trimming the Monaco editor engine
 Measured first (esbuild metafile of the engine): the core (`base`, `editor/common`, `editor/browser`, `platform`) is about
 2.25 MB, 58% of it, and cannot be removed; optional editor contributions are about 0.7 MB; the JSON/HTML/CSS/TypeScript language

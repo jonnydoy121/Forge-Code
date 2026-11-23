@@ -10,6 +10,8 @@ import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNe
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
+import { mark } from "../lib/trace";
+import { prewarmRuntime } from "../lib/runtimeProcess";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
@@ -204,6 +206,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     promptsRef.current.push(prompt);
     setBusy(true);
     setItems((i) => [...i, { kind: "user", text: prompt }, { kind: "assistant", text: "" }]);
+    mark("send: start");
     let began = false;
     try {
       // If the process behind the last session died, start a fresh one and carry the conversation over.
@@ -217,6 +220,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           onHook: (event, output) => onHook(event, output),
           sections: async () => {
             const out: ContextSection[] = [];
+            mark("sections: start");
             const slash = (p: string) => p.split("\\").join("/");
             const rel = (p: string) => slash(p).replace(slash(root!) + "/", "");
             const fileChips = chipsRef.current.filter((c) => c.kind === "file").map((c) => rel(c.arg));
@@ -278,10 +282,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             } catch {
               /* index not ready yet: the agent can still use grep/read tools */
             }
+            mark("sections: done");
             return out;
           },
         });
       }
+      mark("send: session ready");
       const rt = runtime.current;
       if (carried?.length) rt.setHistory(carried);
       setRuntimeKind(rt.transport ?? "");
@@ -293,6 +299,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         pendingHistory.current = null;
       }
       abort.current = new AbortController();
+      mark("send: run() called");
       for await (const ev of rt.run({ mode: runMode, prompt, signal: abort.current.signal })) {
         if (ev.type === "text") {
           setItems((i) => {
@@ -646,6 +653,7 @@ ${diff}`);
         )}
         <textarea
           data-testid="agent-input"
+          onFocus={() => settings.runtimeProcess && prewarmRuntime()}
           rows={3}
           disabled={!root || !services}
           placeholder={root ? "Ask about the code (Enter to send, Shift+Tab cycles mode)" : "Open a folder first"}

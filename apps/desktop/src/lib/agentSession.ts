@@ -4,8 +4,8 @@ import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
 import { modePrompt } from "@forge/plans";
 import { RuntimeClient, type AgentRuntime } from "@forge/agent-runtime/src/remote";
-import { openRuntimePort } from "./runtimeProcess";
-import { invoke } from "@tauri-apps/api/core";
+import { openRuntimePort, sidecarPath } from "./runtimeProcess";
+import { mark } from "./trace";
 import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
 import type { WorkspaceServices } from "./workspace";
@@ -20,7 +20,10 @@ export const tauriFs: FsBackend = {
 function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
   const gateway = new Gateway({
     fetch: services.fetch,
-    onRequest: (i) => services.audit.record({ kind: "model", name: `${i.provider}/${i.model}`, detail: `${i.url} ${i.local ? "(local)" : "(REMOTE)"}`, local: i.local }),
+    onRequest: (i) => {
+      mark("model request leaves the app");
+      services.audit.record({ kind: "model", name: `${i.provider}/${i.model}`, detail: `${i.url} ${i.local ? "(local)" : "(REMOTE)"}`, local: i.local });
+    },
   });
   gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
   return gateway;
@@ -30,7 +33,7 @@ function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
 async function openPort(preferProcess: boolean) {
   if (preferProcess) {
     try {
-      const exe = await invoke<string | null>("runtime_sidecar_path");
+      const exe = await sidecarPath();
       if (exe) return { port: await openRuntimePort(exe), kind: "process" as const };
     } catch {
       /* fall through to the worker */
@@ -49,6 +52,7 @@ export async function createSession(opts: {
   isolated?: boolean;
 }) {
   const { settings, services } = opts;
+  mark("createSession: start");
   const gateway = makeGateway(services, settings);
   const audit = (kind: "model" | "tool", prefix = "") => (e: { kind: "model" | "tool"; name: string; detail?: string }) =>
     services.audit.record({ kind: e.kind === "model" ? "model" : kind, name: `${prefix}${e.name}`, detail: e.detail });
@@ -84,7 +88,9 @@ export async function createSession(opts: {
   const auditEntry = audit("tool");
   // The agent loop runs outside the UI thread (its own OS process, or a Web Worker as the fallback). Everything that
   // needs Tauri IPC (files, HTTP, permissions, indexing) stays here and is served to it over messages.
+  mark("createSession: tools built");
   const transport = typeof Worker !== "undefined" ? await openPort(settings.runtimeProcess) : null;
+  mark("createSession: agent process port ready");
   const runtime: AgentRuntime =
     transport
       ? new RuntimeClient(
@@ -118,7 +124,9 @@ export async function createSession(opts: {
         }) as unknown as AgentRuntime);
   runtime.transport = transport?.kind ?? "inline";
   services.setRuntime(runtime);
+  mark("createSession: client built");
   const started = await runtime.sessionStart().catch(() => null);
+  mark("createSession: sessionStart done");
   if (started?.type === "hook") opts.onHook?.("SessionStart", started.output);
   return runtime;
 }

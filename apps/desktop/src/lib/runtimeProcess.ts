@@ -3,6 +3,7 @@
 
 import { MuxClient } from "@forge/agent-runtime/src/stdio";
 import type { Port } from "@forge/agent-runtime/src/remote";
+import { invoke } from "@tauri-apps/api/core";
 import { launchLineProcess } from "./workspace";
 
 interface Proc {
@@ -37,6 +38,27 @@ async function launch(exe: string): Promise<Proc> {
   };
   current = proc;
   return proc;
+}
+
+let exe: Promise<string | null> | null = null;
+
+/** Where the bundled agent runtime lives, or null when this build has none (a Web Worker is used instead). */
+export const sidecarPath = () => (exe ??= invoke<string | null>("runtime_sidecar_path").catch(() => null));
+
+/**
+ * Start the shared process before the first message needs it: launching it costs from tens of milliseconds to a few hundred
+ * the very first time after an install, which is otherwise added to the first reply. Called when the user focuses the agent
+ * input, so it runs while they type. Released again if nothing uses it within a minute (an idle process holds about 33 MB).
+ */
+export function prewarmRuntime(): void {
+  if (current || starting) return;
+  void sidecarPath().then((path) => {
+    if (!path || current || starting) return;
+    starting = launch(path).finally(() => (starting = null));
+    starting
+      .then((proc) => setTimeout(() => proc.mux.size === 0 && proc.mux.onEmpty?.(), 60_000))
+      .catch(() => {}); // a failed pre-warm is harmless: the first message starts it (or falls back to a worker) as before
+  });
 }
 
 /** A port for a new agent thread, on the shared runtime process (started now if it is not running). */

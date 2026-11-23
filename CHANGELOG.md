@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### First-message latency
+- Measured Enter-to-model-request with trace marks (`src/lib/trace.ts`): 31-37 ms once the agent process runs; a cold first message was 310-390 ms, all of it the runtime process booting (the OS's first-ever run of the 100 MB executable), not our code. Fixes: the shared agent process now starts when the agent input is focused (first message 52 ms; released after 60 s if unused), and absolute `.exe` paths are spawned directly instead of through `cmd.exe` (tested). New specs `latency.spec.ts` (budget for the warm path) and `prewarm.spec.ts`.
+
 ### Monaco trimmed to what the app uses
 - `src/lib/monaco-features.ts` imports only the editor features Forge-Code uses (no go-to-definition, rename, code actions, signature help, colour picker, formatting, semantic tokens, inlay hints, code lens, and no TypeScript/HTML/CSS language services, whose workers were never provided): the engine chunk 3,334 -> 3,135 KB (-6%), everything shipped 5,126 -> 4,827 KB. No measurable memory change; the benefit is about 200 KB less to download and parse. Verified by end-to-end tests for syntax colouring across seven file types (plain text stays uncoloured), find, and the F1 palette with our AI action, plus the existing suites. Tied to the pinned Monaco 0.52.2 (a missing path fails the build).
 - A guard test (`monaco-features.test.ts`) checks every listed module exists in the installed Monaco, that the version is the pinned 0.52.2, that the features the app depends on stay in the list and the unused language services stay out. An upgrade now fails there with the exact missing paths. It was verified to fail when a path is broken.

@@ -32,9 +32,23 @@ struct Exit {
     code: Option<i32>,
 }
 
+/// An absolute path to a real executable (the bundled agent runtime) needs no shell: launching it directly is faster and
+/// avoids an extra cmd.exe process per child. Bare names (PATH lookup) and .cmd/.bat shims still go through cmd.
+#[cfg(windows)]
+fn is_direct_exe(program: &str) -> bool {
+    let p = std::path::Path::new(program);
+    p.is_absolute() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+}
+
 #[cfg(windows)]
 fn command_for(program: &str, args: &[String]) -> Command {
     use std::os::windows::process::CommandExt;
+    if is_direct_exe(program) {
+        let mut c = Command::new(program);
+        c.args(args);
+        c.creation_flags(0x0800_0000);
+        return c;
+    }
     // Run through cmd so PATH lookup and .cmd shims (npx, gemini, ...) work. Arguments with spaces are quoted.
     let quote = |a: &str| if a.is_empty() || a.contains([' ', '\t', '"']) { format!("\"{}\"", a.replace('"', "\\\"")) } else { a.to_string() };
     let line = std::iter::once(quote(program)).chain(args.iter().map(|a| quote(a))).collect::<Vec<_>>().join(" ");
@@ -126,5 +140,21 @@ pub fn proc_stop(state: State<ProcState>, id: u32) {
     if let Some(mut e) = state.procs.lock().unwrap().remove(&id) {
         kill_tree(e.child.id());
         let _ = e.child.kill();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_absolute_exe_is_launched_directly_everything_else_goes_through_cmd() {
+        let exe = r"C:\Program Files\Forge-Code\forge-runtime.exe";
+        assert_eq!(command_for(exe, &[]).get_program(), std::ffi::OsStr::new(exe));
+        // PATH lookups and shims need the shell.
+        assert_eq!(command_for("npx", &[]).get_program(), std::ffi::OsStr::new("cmd"));
+        assert_eq!(command_for(r"C:\tools\gemini.cmd", &[]).get_program(), std::ffi::OsStr::new("cmd"));
+        assert_eq!(command_for(r"relative\thing.exe", &[]).get_program(), std::ffi::OsStr::new("cmd"));
+        assert_eq!(command_for(r"C:\tools\app.EXE", &["--x".into()]).get_program(), std::ffi::OsStr::new(r"C:\tools\app.EXE"));
     }
 }
