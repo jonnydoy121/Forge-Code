@@ -58,6 +58,27 @@ the sets are merged. The dot product also uses eight independent accumulators so
 `.sum()` must add in order, which blocks SIMD. Tests prove the unrolled dot product matches the naive one at every length and
 that the bounded top-k equals the start of the full ranking.
 
+### First index of a 120,000-file repo (profiled, then fixed)
+Profile (6.3-6.4 s): hash every file 1.4-1.6 s, parse + embed on all cores 1.6 s, **write to SQLite 2.2 s on one thread (35%)**,
+insert into memory 0.33 s. Two inefficiencies: on a first index every file is new, yet each was read and hashed once just to
+find that out and then read again to be parsed; and the SQLite write ran strictly after each parse batch, with the JSON and vector
+serialisation done on that one thread.
+
+| | Before | After |
+|---|---|---|
+| First index | 6.3-6.4 s | **2.9-3.0 s (-54%)** |
+| Change-detection pass | 1.4-1.6 s | 0.005 s (skipped when nothing is indexed yet) |
+
+What changed: (1) with nothing indexed yet, the hashing pass is skipped and the Merkle tree is built from the parsed results;
+(2) each file's JSON and vector bytes are produced on the parallel workers, and a dedicated writer thread stores batch N while
+the cores parse batch N+1 (bounded queue, so memory stays small; a writer failure is reported, not lost). A test proves a first
+index gives exactly the same result as building the same files incrementally: same counts, same Merkle root, same symbols,
+binary and secret files left out, and the stored rows load back intact. The SQLite writer (2.3 s) is now the longest stage and
+hides behind parsing, so it is the next limit.
+
+Tried and rejected: raising SQLite's WAL auto-checkpoint interval (write time unchanged, total worse); a bigger SQLite page cache
+could help the write but would hold hundreds of MB for good, trading away the memory this work reduces.
+
 ### Warm open of a 120,000-file repo (profiled, then fixed)
 The build now records where its time goes (`BuildStats.phases`), so this was measured rather than guessed. Profile of the old
 path: opening from SQLite 999 ms = row read 302 + JSON decode 239 + vector conversion 71 + inserting into the in-memory index 368;

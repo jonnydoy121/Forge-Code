@@ -274,3 +274,48 @@ fn the_unchanged_fast_path_never_misses_a_real_change_and_survives_a_restart() {
     assert_eq!(reopened.semantic_search("password login attempt", 1).first().map(|h| h.file.clone()), hit_before);
     assert_eq!(reopened.symbol("renamedThing").len(), 0, "the deleted file stayed deleted across the restart");
 }
+
+#[test]
+fn a_first_index_gives_exactly_the_same_index_as_building_the_same_files_incrementally() {
+    let full = fixture();
+    write(full.path(), "assets/blob.bin", "binary\u{0}\u{0}data");
+    // Cold: everything is new, so the change-detection pass is skipped.
+    let db_a = tempfile::tempdir().unwrap();
+    let a = open(full.path(), &db_a.path().join("a.db"));
+    a.build(&|_| {}).unwrap();
+
+    // Incremental: index most of the files first, then add the rest (the second build is not cold).
+    let partial = tempfile::tempdir().unwrap();
+    let later = ["src/api.ts", "pkg/mod.py", "matrix.ts"];
+    for rel in ["src/auth.ts", "src/user.ts", "src/user.test.ts", "pkg/util.py", ".env", ".gitignore", ".forgeignore", "private.ts", "ignored/x.ts", "node_modules/dep/index.js", "assets/blob.bin"] {
+        let from = full.path().join(rel);
+        if from.exists() {
+            write(partial.path(), rel, &fs::read_to_string(&from).unwrap());
+        }
+    }
+    let db_b = tempfile::tempdir().unwrap();
+    let b = open(partial.path(), &db_b.path().join("b.db"));
+    b.build(&|_| {}).unwrap();
+    for rel in later {
+        write(partial.path(), rel, &fs::read_to_string(full.path().join(rel)).unwrap());
+    }
+    b.build(&|_| {}).unwrap();
+
+    let (sa, sb) = (a.status(), b.status());
+    assert_eq!((sa.indexed_files, sa.symbols, sa.chunks), (sb.indexed_files, sb.symbols, sb.chunks));
+    assert_eq!(sa.merkle_root, sb.merkle_root, "same files must give the same Merkle root whichever way they were indexed");
+    assert!(!sa.merkle_root.is_empty());
+    for name in ["validatePassword", "UserService", "matrixMultiply", "run"] {
+        assert_eq!(format!("{:?}", a.symbol(name)), format!("{:?}", b.symbol(name)), "symbol {name}");
+    }
+    // Binary and secret files stay out whichever path is taken.
+    let all = a.grep("blob|supersecretvalue", None, 10).unwrap();
+    assert!(all.is_empty(), "binary and secret files must not be indexed: {all:?}");
+
+    // And the rows the cold path wrote (serialised on the parallel workers, stored by the writer thread) load back intact.
+    drop(a);
+    let again = open(full.path(), &db_a.path().join("a.db"));
+    assert_eq!(again.status().indexed_files, sa.indexed_files);
+    assert_eq!(format!("{:?}", again.symbol("validatePassword")), format!("{:?}", b.symbol("validatePassword")));
+    assert_eq!(again.build(&|_| {}).unwrap().reparsed, 0);
+}

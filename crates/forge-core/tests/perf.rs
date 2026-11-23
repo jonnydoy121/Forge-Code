@@ -52,6 +52,7 @@ fn large_repo_meets_targets() {
     let stats = handle.join().unwrap();
     let st = idx.status();
     println!("first index: {:?} ({} files indexed, {} symbols, {} chunks)", stats.millis, st.indexed_files, st.symbols, st.chunks);
+    println!("first index phases: {}", stats.phases.iter().map(|(n, ms)| format!("{n} {ms} ms")).collect::<Vec<_>>().join(" | "));
     if let Some((n, d, at, indexed)) = first_grep {
         println!("grep during build: {n} hits in {d:?}, issued {at:?} into the build when {indexed} files were parsed");
     }

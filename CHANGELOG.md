@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### First index twice as fast
+- Indexing a 120,000-file repo for the first time: 6.3 s -> 2.9 s (-54%), same result. The change-detection pass (read and hash every file) is skipped when nothing is indexed yet, and SQLite writes now run on their own thread, overlapped with parsing, with serialisation done on the parallel workers. Test: a first index equals the same files built incrementally (counts, Merkle root, symbols, exclusions, round trip through disk). Rejected after measuring: a larger WAL checkpoint interval.
+
 ### First-message latency
 - Measured Enter-to-model-request with trace marks (`src/lib/trace.ts`): 31-37 ms once the agent process runs; a cold first message was 310-390 ms, all of it the runtime process booting (the OS's first-ever run of the 100 MB executable), not our code. Fixes: the shared agent process now starts when the agent input is focused (first message 52 ms; released after 60 s if unused), and absolute `.exe` paths are spawned directly instead of through `cmd.exe` (tested). New specs `latency.spec.ts` (budget for the warm path) and `prewarm.spec.ts`.
 

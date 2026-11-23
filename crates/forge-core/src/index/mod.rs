@@ -89,6 +89,11 @@ impl Phases {
         self.out.push((name, now - self.last));
         self.last = now;
     }
+    /// Record time measured elsewhere (summed over many batches) as its own phase.
+    fn record(&mut self, name: &'static str, millis: u128) {
+        self.out.push((name, millis));
+        self.last += millis;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -162,6 +167,25 @@ fn e<T: ToString>(x: T) -> Err {
 
 fn mtime_ms(m: &std::fs::Metadata) -> u64 {
     m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// A file's row for SQLite with the JSON and vector bytes already produced, so serialising happens on the parallel
+/// workers and the single writer only has to insert.
+struct PreparedRow {
+    path: String,
+    hash: String,
+    size: i64,
+    mtime: i64,
+    data: String,
+    vecs: Vec<u8>,
+}
+
+impl PreparedRow {
+    fn new(path: &str, f: &FileEntry) -> Self {
+        let flat: Vec<f32> = f.vecs.iter().flatten().copied().collect();
+        // A row that cannot be serialised is stored empty: it fails to load later and the file is simply re-indexed.
+        PreparedRow { path: path.to_string(), hash: f.hash.clone(), size: f.size as i64, mtime: f.mtime as i64, data: serde_json::to_string(&f.parsed).unwrap_or_default(), vecs: to_bytes(&flat) }
+    }
 }
 
 struct Walked {
@@ -337,13 +361,17 @@ impl Index {
     }
 
     fn persist(&self, rows: &[(String, FileEntry)], removed: &[String]) -> Result<(), Err> {
+        let prepared: Vec<PreparedRow> = rows.iter().map(|(p, f)| PreparedRow::new(p, f)).collect();
+        self.persist_prepared(&prepared, removed)
+    }
+
+    fn persist_prepared(&self, rows: &[PreparedRow], removed: &[String]) -> Result<(), Err> {
         let mut db = self.db.lock().unwrap();
         let tx = db.transaction().map_err(e)?;
         {
             let mut up = tx.prepare_cached("INSERT OR REPLACE INTO files(path,hash,size,mtime,data,vecs) VALUES(?1,?2,?3,?4,?5,?6)").map_err(e)?;
-            for (p, f) in rows {
-                let flat: Vec<f32> = f.vecs.iter().flatten().copied().collect();
-                up.execute(params![p, f.hash, f.size as i64, f.mtime as i64, serde_json::to_string(&f.parsed).map_err(e)?, to_bytes(&flat)]).map_err(e)?;
+            for r in rows {
+                up.execute(params![r.path, r.hash, r.size, r.mtime, r.data, r.vecs]).map_err(e)?;
             }
             let mut del = tx.prepare_cached("DELETE FROM files WHERE path=?1").map_err(e)?;
             for p in removed {
@@ -385,9 +413,12 @@ impl Index {
 
         // Phase 1: hash files whose (size, mtime) changed since last time.
         let hashed = AtomicUsize::new(0);
+        // Nothing indexed yet (a first index): every file will be parsed anyway, so reading and hashing them all first just
+        // to learn that is wasted work. The tree is built from the parsed results instead.
+        let cold = self.state.read().unwrap().files.is_empty();
         let fresh: Vec<(String, Option<(String, u64, u64)>)> = {
             let st = self.state.read().unwrap();
-            let needs: Vec<&Walked> = walked.iter().filter(|w| st.files.get(&w.rel).map(|f| f.size != w.size || f.mtime != w.mtime).unwrap_or(true)).collect();
+            let needs: Vec<&Walked> = if cold { Vec::new() } else { walked.iter().filter(|w| st.files.get(&w.rel).map(|f| f.size != w.size || f.mtime != w.mtime).unwrap_or(true)).collect() };
             let n = needs.len();
             needs
                 .par_iter()
@@ -412,6 +443,10 @@ impl Index {
         let mut meta_only: Vec<(String, u64, u64)> = Vec::new();
         let (new_merkle, d) = if unchanged {
             (None, merkle::Diff::default())
+        } else if cold {
+            let mut all: Vec<String> = walked.iter().map(|w| w.rel.clone()).collect();
+            all.sort();
+            (None, merkle::Diff { added_or_changed: all, removed: Vec::new(), visited: 0 })
         } else {
             let old_merkle = Self::current_merkle(&self.state.read().unwrap());
             // Build the new Merkle tree from known + fresh hashes, then diff against the old one.
@@ -448,28 +483,62 @@ impl Index {
         let meta: HashMap<&str, (u64, u64)> = walked.iter().map(|w| (w.rel.as_str(), (w.size, w.mtime))).collect();
         let embed_before = self.embed_calls.load(Ordering::Relaxed);
         let done = AtomicUsize::new(0);
-        for batch in changed.chunks(512) {
-            let results: Vec<(String, FileEntry)> = {
-                let st = self.state.read().unwrap();
-                batch
-                    .par_iter()
-                    .filter_map(|rel| {
-                        let (size, mtime) = *meta.get(rel.as_str())?;
-                        let r = self.process(rel, size, mtime, st.files.get(rel))?;
-                        let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                        if n % 500 == 0 {
-                            progress(Progress { phase: "parse", done: n, total: changed.len() });
-                        }
-                        Some((rel.clone(), r))
-                    })
-                    .collect()
-            };
-            self.persist(&results, &[])?;
-            let mut st = self.state.write().unwrap();
-            for (p, f) in results {
-                Self::apply(&mut st, p, f);
-            }
-        }
+        // Parsing and embedding use every core; writing to SQLite is one thread. They overlap: while a writer thread stores batch N
+        // (already serialised on the parallel workers), the cores parse batch N+1.
+        let (mut t_parse, mut t_insert) = (0u128, 0u128);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<PreparedRow>>(2);
+        let written = std::thread::scope(|scope| -> Result<u128, Err> {
+            let writer = scope.spawn(move || -> Result<u128, Err> {
+                let mut ms = 0u128;
+                for rows in rx {
+                    let t = std::time::Instant::now();
+                    self.persist_prepared(&rows, &[])?;
+                    ms += t.elapsed().as_millis();
+                }
+                Ok(ms)
+            });
+            let produced = (|| -> Result<(), Err> {
+                for batch in changed.chunks(512) {
+                    let t = std::time::Instant::now();
+                    let results: Vec<(String, FileEntry, PreparedRow)> = {
+                        let st = self.state.read().unwrap();
+                        batch
+                            .par_iter()
+                            .filter_map(|rel| {
+                                let (size, mtime) = *meta.get(rel.as_str())?;
+                                let r = self.process(rel, size, mtime, st.files.get(rel))?;
+                                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                                if n % 500 == 0 {
+                                    progress(Progress { phase: "parse", done: n, total: changed.len() });
+                                }
+                                let row = PreparedRow::new(rel, &r);
+                                Some((rel.clone(), r, row))
+                            })
+                            .collect()
+                    };
+                    t_parse += t.elapsed().as_millis();
+                    let (entries, rows): (Vec<(String, FileEntry)>, Vec<PreparedRow>) = results.into_iter().map(|(p, f, row)| ((p, f), row)).unzip();
+                    if tx.send(rows).is_err() {
+                        break; // the writer stopped (it failed): its error is returned below
+                    }
+                    let t = std::time::Instant::now();
+                    let mut st = self.state.write().unwrap();
+                    for (p, f) in entries {
+                        Self::apply(&mut st, p, f);
+                    }
+                    t_insert += t.elapsed().as_millis();
+                }
+                Ok(())
+            })();
+            drop(tx); // no more batches: let the writer finish
+            let write_ms = writer.join().map_err(|_| "the index writer thread panicked".to_string())??;
+            produced?;
+            Ok(write_ms)
+        });
+        let t_write = written?;
+        phases.record("parse + embed (all cores)", t_parse);
+        phases.record("insert into memory (one thread)", t_insert);
+        phases.out.push(("write to SQLite (own thread, overlapped, not added to the total)", t_write));
         // Metadata-only updates (touched but identical) and removals.
         if !meta_only.is_empty() {
             let mut rows = Vec::new();
@@ -495,7 +564,8 @@ impl Index {
             }
             st.graph = None;
         }
-        phases.mark("parse, embed, persist");
+        phases.mark("metadata updates and removals");
+        let new_merkle = if cold { Some(Self::current_merkle(&self.state.read().unwrap())) } else { new_merkle };
         {
             let mut st = self.state.write().unwrap();
             if new_merkle.is_some() {
