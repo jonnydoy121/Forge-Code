@@ -99,7 +99,15 @@ fn network_is_off_even_for_loopback() {
     assert!(plain.stdout.contains("SERVER-SAID"), "positive control: unsandboxed curl reaches the listener: {} {}", plain.stdout, plain.stderr);
 
     let o = run(&cmd, ws.path(), 30);
-    assert!(!o.result.stdout.contains("SERVER-SAID"), "sandbox reached the network");
+    assert!(
+        !o.result.stdout.contains("SERVER-SAID"),
+        "sandbox reached the network (this was once seen on a CI runner and not reproduced; the details below say whether the command was really contained): mode={:?} code={:?} warnings={:?} stdout={:?} stderr={:?}",
+        o.mode,
+        o.result.code,
+        o.warnings,
+        o.result.stdout,
+        o.result.stderr
+    );
     // curl itself ran (it printed its own error), so this is a real network refusal, not a missing binary
     assert!(o.result.stderr.contains("curl:"), "curl should have run and failed to connect; stderr: {}", o.result.stderr);
     assert_ne!(o.result.code, Some(0));

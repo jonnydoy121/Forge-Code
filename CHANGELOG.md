@@ -10,6 +10,7 @@ Found by screenshotting the real window (before and after) rather than by guessi
 - **The review panel no longer shows an empty "Checks:" label** before anything has been checked.
 - **The empty editor screen shows its shortcuts as key chips**, and the Settings panel lost a stray horizontal scrollbar.
 - Looked at and left alone: thread-tab buttons already had tooltips; the diff review, chat markdown and code blocks already looked right.
+- **An unexplained CI failure, not fixed.** On the polish push the Windows job failed once in the Rust sandbox test `network_is_off_even_for_loopback` (the sandboxed `curl` received the loopback listener's reply). No Rust code had changed; the rerun and a local run passed, and everything else in the sandbox suite held on the failing run. That run was also very slow (the sandbox suite took 127 s against about 1 s here), so a degraded runner is possible, but this is a guess. The test's failure message now includes the sandbox mode, warnings, exit code and output so a recurrence can be explained.
 - **Not done (ideas from the same comparison):** a full-page Settings screen instead of the narrow panel, syntax highlighting in chat code blocks, file-type icons in the explorer, resizable panels.
 
 ### Settings: Strata connection, schedules and bridges, auto-skill controls
