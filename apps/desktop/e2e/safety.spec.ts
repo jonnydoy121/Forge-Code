@@ -65,7 +65,7 @@ test("an external ACP agent runs inside Forge: its edits go to the review UI, pe
     // The configured agent shows up under Connections and in the mode menu.
     await page.keyboard.press("Control+Shift+K");
     await page.getByTestId("ctx-tab-connections").click();
-    await expect(page.getByTestId("acp-agent")).toContainText("mock");
+    await expect(page.getByTestId("acp-agent").filter({ hasText: "mock" })).toHaveCount(1); // the list may also show the built-in Claude agent
     await page.keyboard.press("Control+Shift+K");
     await page.getByTestId("mode-select").selectOption("ext:mock");
 

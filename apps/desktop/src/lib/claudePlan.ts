@@ -42,6 +42,53 @@ export async function detectClaudePlan(run: RunCommand): Promise<ClaudePlan> {
   }
 }
 
+const CACHE_KEY = "forge.claude-plan.v1";
+const CACHE_MS = 10 * 60_000;
+type Store = Pick<Storage, "getItem" | "setItem">;
+
+/** The last definite answer if it is recent. Remembered so the mode list is right from the first paint instead of changing a moment after it. */
+export function readCachedPlan(store: Store | null, now = Date.now()): ClaudePlan | null {
+  try {
+    const raw = store?.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { at, plan } = JSON.parse(raw) as { at?: number; plan?: ClaudePlan };
+    return plan && typeof at === "number" && now - at < CACHE_MS && now >= at ? plan : null;
+  } catch {
+    return null;
+  }
+}
+
+let inflight: Promise<ClaudePlan> | null = null;
+
+/**
+ * The plan status, from the cache when it is fresh (unless `force`), else by asking Claude Code. Many panels may ask at once (one per
+ * thread): they share one question. Only definite answers are remembered; "unknown" is asked again next time.
+ */
+export function claudePlanCached(run: RunCommand, opts: { force?: boolean; store?: Store | null; now?: number } = {}): Promise<ClaudePlan> {
+  const store = opts.store === undefined ? (typeof localStorage === "undefined" ? null : localStorage) : opts.store;
+  if (!opts.force) {
+    const hit = readCachedPlan(store, opts.now);
+    if (hit) return Promise.resolve(hit);
+    if (inflight) return inflight;
+  }
+  const asked = detectClaudePlan(run).then((plan) => {
+    if (plan.state !== "unknown") {
+      try {
+        store?.setItem(CACHE_KEY, JSON.stringify({ at: opts.now ?? Date.now(), plan }));
+      } catch {
+        /* storage unavailable: just not remembered */
+      }
+    }
+    return plan;
+  });
+  inflight = asked;
+  const clear = () => {
+    if (inflight === asked) inflight = null;
+  };
+  void asked.then(clear, clear);
+  return asked;
+}
+
 /** One line for the settings screen. */
 export function describeClaudePlan(p: ClaudePlan | null, localOnly: boolean): string {
   if (localOnly) return "Local-only mode is on, so Claude (which runs on Anthropic's servers) is hidden.";

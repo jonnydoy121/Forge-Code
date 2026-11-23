@@ -384,7 +384,9 @@ export async function createWorkspaceServices(opts: {
   const acpCfg = parseAcpConfig(await diskFs.read(`${root}/.forge/acp.json`));
   const acpClients = new Map<string, { client: AcpClient; session: string; close: () => void; onUpdate: { current: (u: AcpUpdate) => void } }>();
   let builtinClaude = false;
-  const allAgents = () => (builtinClaude && !acpCfg.agents.some((a) => a.name === CLAUDE_AGENT.name) ? [...acpCfg.agents, CLAUDE_AGENT] : acpCfg.agents);
+  // The same array until the answer changes (a new one on every read would look like a change to anything comparing it).
+  const withClaude = [...acpCfg.agents, CLAUDE_AGENT];
+  const allAgents = () => (builtinClaude && !acpCfg.agents.some((a) => a.name === CLAUDE_AGENT.name) ? withClaude : acpCfg.agents);
   const acpHandle = {
     get agents() {
       return allAgents();

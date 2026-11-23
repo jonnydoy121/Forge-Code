@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLAUDE_AGENT, describeClaudePlan, detectClaudePlan, parseAuthStatus } from "./claudePlan";
+import { CLAUDE_AGENT, claudePlanCached, describeClaudePlan, detectClaudePlan, parseAuthStatus, readCachedPlan } from "./claudePlan";
 
 const signedIn = JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", loginExpiresAt: "2026-12-18T13:28:16.115Z" });
 
@@ -55,5 +55,61 @@ describe("describeClaudePlan and the preset", () => {
   });
   it("the preset launches the official Claude Code adapter and sets no API key", () => {
     expect(CLAUDE_AGENT).toEqual({ name: "claude", command: "npx", args: ["-y", "@agentclientprotocol/claude-agent-acp"], env: {} });
+  });
+});
+
+describe("claudePlanCached (so the mode list is right from the first paint)", () => {
+  const memory = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+  const counting = (stdout: string) => {
+    let n = 0;
+    return { run: async () => (n++, { code: 0, stdout, stderr: "" }), calls: () => n };
+  };
+
+  it("asks once, then answers from the cache for ten minutes", async () => {
+    const store = memory();
+    const c = counting(signedIn);
+    const first = await claudePlanCached(c.run, { store, now: 1_000 });
+    expect(first).toMatchObject({ state: "signed-in" });
+    expect(await claudePlanCached(c.run, { store, now: 2_000 })).toEqual(first);
+    expect(c.calls()).toBe(1);
+    expect(readCachedPlan(store, 5 * 60_000)).toEqual(first);
+    expect(readCachedPlan(store, 11 * 60_000)).toBeNull(); // too old
+    await claudePlanCached(c.run, { store, now: 11 * 60_000 });
+    expect(c.calls()).toBe(2);
+  });
+
+  it("asks again when forced (Check again), and never remembers an unknown answer", async () => {
+    const store = memory();
+    const c = counting(signedIn);
+    await claudePlanCached(c.run, { store, now: 1 });
+    await claudePlanCached(c.run, { store, now: 2, force: true });
+    expect(c.calls()).toBe(2);
+    const bad = memory();
+    const failing = counting("not json");
+    expect(await claudePlanCached(failing.run, { store: bad, now: 1 })).toMatchObject({ state: "unknown" });
+    await claudePlanCached(failing.run, { store: bad, now: 2 });
+    expect(failing.calls()).toBe(2); // not cached
+  });
+
+  it("shares one question between panels that ask at the same time", async () => {
+    let n = 0;
+    const slow = async () => (n++, await new Promise((r) => setTimeout(r, 20)), { code: 0, stdout: signedIn, stderr: "" });
+    const store = memory();
+    const [a, b, c] = await Promise.all([claudePlanCached(slow, { store: null, now: 1 }), claudePlanCached(slow, { store: null, now: 1 }), claudePlanCached(slow, { store: null, now: 1 })]);
+    expect(n).toBe(1);
+    expect(a).toEqual(b);
+    expect(b).toEqual(c);
+    expect(readCachedPlan(store)).toBeNull();
+  });
+
+  it("copes with unreadable or hostile storage", async () => {
+    expect(readCachedPlan({ getItem: () => "{not json", setItem: () => {} })).toBeNull();
+    expect(readCachedPlan({ getItem: () => JSON.stringify({ at: "yesterday", plan: { state: "signed-in" } }), setItem: () => {} })).toBeNull();
+    expect(readCachedPlan({ getItem: () => { throw new Error("denied"); }, setItem: () => {} })).toBeNull();
+    const throwing = { getItem: () => null, setItem: () => { throw new Error("full"); } };
+    expect(await claudePlanCached(counting(signedIn).run, { store: throwing, now: 1 })).toMatchObject({ state: "signed-in" });
   });
 });

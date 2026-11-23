@@ -25,7 +25,7 @@ import { classifyIntent, looksLarge } from "@forge/plans";
 import { ReportCard } from "./ReportCard";
 import type { VerificationReport } from "@forge/verify";
 import { git, tauriExec, type ReportEvent } from "../lib/workspace";
-import { CLAUDE_AGENT, describeClaudePlan, detectClaudePlan, type ClaudePlan } from "../lib/claudePlan";
+import { CLAUDE_AGENT, claudePlanCached, describeClaudePlan, readCachedPlan, type ClaudePlan } from "../lib/claudePlan";
 
 const MODES: Mode[] = ["ask", "plan", "agent", "debug"];
 
@@ -170,7 +170,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [showAudit, setShowAudit] = useState(false);
   const [external, setExternal] = useState<string | null>(null);
   // Claude Code signed in with the developer's own Claude account: offered as an agent, no API key needed.
-  const [claudePlan, setClaudePlan] = useState<ClaudePlan | null>(null);
+  // Starts from the last answer (kept ten minutes), so the mode list is right from the first paint instead of changing a moment later.
+  const [claudePlan, setClaudePlan] = useState<ClaudePlan | null>(() => readCachedPlan(typeof localStorage === "undefined" ? null : localStorage));
   const [claudeCheck, setClaudeCheck] = useState(0);
   const [showTimeline, setShowTimeline] = useState(false);
   const [suggest, setSuggest] = useState<string | null>(null);
@@ -237,16 +238,17 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   }, [settings.scoutProvider, settings.architectProvider]);
 
   useEffect(() => {
-    if (!services || !root) return;
+    if (!root) return;
     let live = true;
-    setClaudePlan(null);
-    void detectClaudePlan((command) => tauriExec.run(command, { cwd: root, sandbox: false, timeoutMs: 15_000 })).then((p) => {
-      if (live) setClaudePlan(p);
+    const forced = claudeCheck > 0; // "Check again": ask Claude Code now and show that we are asking
+    if (forced) setClaudePlan(null);
+    void claudePlanCached((command) => tauriExec.run(command, { cwd: root, sandbox: false, timeoutMs: 15_000 }), { force: forced }).then((p) => {
+      if (live) setClaudePlan((cur) => (cur && JSON.stringify(cur) === JSON.stringify(p) ? cur : p)); // no re-render when nothing changed
     });
     return () => {
       live = false;
     };
-  }, [services, root, claudeCheck]);
+  }, [root, claudeCheck]);
   // Claude runs on Anthropic's servers, so local-only mode hides it; a login that is not a subscription would bill an account, so it is
   // still offered but says so in Settings. Set before the mode list is drawn (an idempotent flag), so the list shows it at once.
   const offerClaude = claudePlan?.state === "signed-in" && !settings.localOnly;
@@ -569,7 +571,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         <select
           aria-label="Mode"
           data-testid="mode-select"
-          className="max-w-[8rem] rounded bg-[var(--hover)] px-1" /* a select is as wide as its longest option: capped, so a long agent name cannot push the header buttons out of the panel */
+          className="w-[7.5rem] rounded bg-[var(--hover)] px-1" /* a fixed width: a select is as wide as its longest option, so a new or long agent name would otherwise move the header buttons */
           value={external ? `ext:${external}` : mode}
           onChange={(e) => {
             const v = e.target.value;

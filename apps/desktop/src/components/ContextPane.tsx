@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CLAUDE_AGENT } from "../lib/claudePlan";
 import { RuleEngine, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
 import type { WorkspaceServices } from "../lib/workspace";
 
@@ -282,6 +283,7 @@ function ConnectionsTab({ services }: { services: WorkspaceServices }) {
           {services.acp.agents.map((a) => (
             <li key={a.name} className="rounded border border-[var(--border)] p-2" data-testid="acp-agent">
               <strong>{a.name}</strong> <code className="text-xs text-[var(--muted)]">{[a.command, ...a.args].join(" ")}</code>
+              {a === CLAUDE_AGENT && <span className="ml-1 text-xs text-[var(--muted)]" data-testid="acp-builtin">(built in: your Claude plan, shown when Claude Code is signed in)</span>}
             </li>
           ))}
           {services.acp.agents.length === 0 && <li className="text-[var(--muted)]">None configured.</li>}
