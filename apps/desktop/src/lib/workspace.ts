@@ -24,6 +24,7 @@ import { listen } from "@tauri-apps/api/event";
 import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/plans";
 import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts, loadPrompts, loadSkills, createSkillTools, type SavedPrompt, type Skill } from "@forge/context-store";
 import { loadSettings } from "./settings";
+import { createDiagnosticsTool, type CheckResult } from "./diagnosticsTool";
 import { fetchText as rawFetchText, pickFetch } from "./http";
 import type { VerifyDeps } from "@forge/agent-runtime";
 import type { AgentRuntime } from "@forge/agent-runtime/src/remote";
@@ -132,6 +133,8 @@ export interface WorkspaceServices {
   docs: DocsStore;
   sessions: SessionStore;
   contextTools: RegisteredTool[];
+  /** The `diagnostics` tool, or none when this workspace has no language server to ask. */
+  diagnosticsTools: RegisteredTool[];
   /** Detected project facts (stack, config, code conventions) for linting and rule generation. */
   facts(): Promise<ProjectFacts>;
   /** Rules that contradict the project's own configuration, or contain secrets. */
@@ -183,6 +186,8 @@ export async function createWorkspaceServices(opts: {
   ask: (req: AskRequest) => Promise<Remember>;
   /** Current LSP diagnostics for workspace-relative files. */
   diagnostics: (files: string[]) => Promise<StructuredError[]>;
+  /** Ask the language server about a file's text (workspace-relative path). Absent when there is no language server to ask. */
+  checkFile?: (rel: string, text: string) => Promise<CheckResult>;
   /** Plan mode: clarifying questions with suggested defaults. */
   askQuestions: (qs: Question[]) => Promise<string[]>;
   /** Build: "Step 3 also needs utils/date.ts. Add it?" */
@@ -440,6 +445,7 @@ export async function createWorkspaceServices(opts: {
       },
     }),
     editTools: createEditTools(sink),
+    diagnosticsTools: opts.checkFile ? [createDiagnosticsTool(opts.checkFile)] : [],
     verifyTools: createVerifyTools({
       runner: (phase, touched) => verifyOpts(phase, touched),
       touched: () => [...sessionTouched].map(([path, created]) => ({ path, created })),

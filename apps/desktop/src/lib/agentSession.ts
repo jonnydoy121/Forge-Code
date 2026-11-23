@@ -57,7 +57,7 @@ export async function createSession(opts: {
   const audit = (kind: "model" | "tool", prefix = "") => (e: { kind: "model" | "tool"; name: string; detail?: string }) =>
     services.audit.record({ kind: e.kind === "model" ? "model" : kind, name: `${prefix}${e.name}`, detail: e.detail });
 
-  const readTools = [...READ_TOOLS, ...(opts.isolated ? [] : createIndexTools(indexBackend)), ...services.contextTools.filter((t) => t.spec.class === "read" && t.spec.name !== "remember")];
+  const readTools = [...READ_TOOLS, ...(opts.isolated ? [] : [...createIndexTools(indexBackend), ...services.diagnosticsTools]), ...services.contextTools.filter((t) => t.spec.class === "read" && t.spec.name !== "remember")];
   // Sub-agents: fresh context, read-only tools, no `delegate` (no recursion). Only their report comes back.
   const makeSub = () =>
     new Runtime({

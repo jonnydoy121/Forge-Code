@@ -1,6 +1,7 @@
 import { lspApi } from "./ipc";
 import { LspClient, type Diagnostic } from "./lspClient";
-import { pathToUri } from "./uri";
+import { DiagnosticsTracker, type FileCheck, type OpenDoc } from "./diagnosticsTracker";
+import { normalizeUri, pathToUri } from "./uri";
 
 export type ServerKey = "typescript" | "python";
 export type ServerStatus = { state: "starting" | "ready" | "unavailable"; detail?: string };
@@ -22,6 +23,9 @@ export class LspManager {
   private root: string | null = null;
   private diagHandlers: ((uri: string, diags: Diagnostic[]) => void)[] = [];
   private statusHandlers: ((key: ServerKey, s: ServerStatus) => void)[] = [];
+  private tracker = new DiagnosticsTracker();
+  /** Documents the editor has open, by normalised uri. The editor owns them; the agent's checks never edit them in place. */
+  private opened = new Map<string, OpenDoc>();
 
   onDiagnostics(h: (uri: string, diags: Diagnostic[]) => void) {
     this.diagHandlers.push(h);
@@ -32,6 +36,7 @@ export class LspManager {
 
   async setRoot(root: string | null) {
     await this.stopAll();
+    this.opened.clear();
     this.root = root;
   }
 
@@ -64,7 +69,9 @@ export class LspManager {
         send: (m) => void lspApi.send(id, m),
         onMessage: (h) => (handler = h),
       });
-      client.onDiagnostics((p) => this.diagHandlers.forEach((h) => h(p.uri, p.diagnostics)));
+      client.onDiagnostics((p) => {
+        if (this.tracker.publish(p.uri, p.diagnostics)) this.diagHandlers.forEach((h) => h(p.uri, p.diagnostics));
+      });
       await client.initialize(pathToUri(root));
       this.statusHandlers.forEach((h) => h(key, { state: "ready" }));
       return { id, client };
@@ -75,17 +82,30 @@ export class LspManager {
   }
 
   async open(path: string, language: string, version: number, text: string) {
+    this.opened.set(normalizeUri(pathToUri(path)), { language, version, text });
     const s = await this.ensure(language);
     s?.client.openDocument(pathToUri(path), language, version, text);
   }
 
   async change(path: string, language: string, version: number, text: string) {
+    this.opened.set(normalizeUri(pathToUri(path)), { language, version, text });
     const s = await this.ensure(language);
     s?.client.changeDocument(pathToUri(path), version, text);
   }
 
   async close(path: string, language: string) {
+    this.opened.delete(normalizeUri(pathToUri(path)));
+    this.tracker.forget(pathToUri(path));
     const s = await this.ensure(language);
     s?.client.closeDocument(pathToUri(path));
+  }
+
+  /** What the language server says about `text` as the file `path` (open in the editor or not), for the agent's `diagnostics` tool. */
+  async check(path: string, language: string, text: string): Promise<FileCheck | { status: "no-server"; reason: string }> {
+    if (!serverKeyFor(language)) return { status: "no-server", reason: `no language server is set up for ${language} files (TypeScript, JavaScript and Python are covered)` };
+    const s = await this.ensure(language);
+    if (!s) return { status: "no-server", reason: "the language server is not available (not installed, or it failed to start)" };
+    const uri = pathToUri(path);
+    return this.tracker.check(uri, language, text, s.client, () => this.opened.get(normalizeUri(uri)));
   }
 }

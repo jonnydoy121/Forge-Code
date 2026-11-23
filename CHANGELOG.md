@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Agent tool: diagnostics
+- New `diagnostics` tool: the agent can ask the language server (TypeScript/JavaScript and Python) about one file in about a second, without running the project's checks. It checks the file **as the agent sees it, including its own unaccepted edits**, so it can verify an edit before the developer has accepted it. Errors come first with 1-based line:col, code and message; long lists are capped. Read-class (Ask and Plan mode have it), refuses secret files and path escapes, and says plainly when no server covers the file or the server did not answer (it does not replace `run_checks`).
+- How: the text is opened on the language server under a sibling shadow uri (`a.ts` -> `a.forge-check.ts`), so the editor's own document, version numbers and diagnostics are never touched, and the editor never sees the probe's results. An editor document with exactly the checked text answers from its live diagnostics instead. Checks of one file run one at a time; the server is given 15 s, and answers are taken once it has gone quiet, so a second round of diagnostics is not missed. Not offered in isolated threads (their worktree has no language server).
+- Found while testing: closing and reopening the editor's own document around a probe made the server publish an empty list that was mistaken for the answer, which is why probes use a shadow uri.
+- Tests: tracker and tool units (15 + 5), and `diagnostics.spec.ts` against the real TypeScript server (a file the editor never opened, a pending edit to an open file, an unsupported file, and the editor still saving normally afterwards; 5 of 5 runs).
+
 ### Agent tools: find files, better grep
 - New `find_files` tool: find files by name. A pattern with `* ? [ {` is a glob (`*.test.ts` matches anywhere, `src/**/*.ts` is anchored, `*.{ts,py}` works); anything else is a case-insensitive part of the path (`auth` finds `src/auth/login.ts`). Answered from the Rust index (honours .gitignore, never lists excluded or secret files); a plain-walk fallback covers the CLI and an index that is not ready. Read-class, so Ask and Plan mode have it.
 - `grep` gains `ignore_case` and `files_only` (each matching file once, however many hits it has), in both the indexer and the fallback. The fallback's glob now follows the indexer's rule (a pattern without a slash matches by name anywhere) and supports `{a,b}`.

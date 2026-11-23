@@ -23,6 +23,7 @@ import type { Mode } from "@forge/protocol";
 import type { ReviewMode } from "@forge/review";
 import { createThreadWorktree, mergeThread, removeThread, threadSummary } from "./lib/worktree";
 import { createWorkspaceServices, diskFs, git, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
+import { languageForPath } from "./lib/uri";
 import { loadSettings, onSettingsChange } from "./lib/settings";
 import { loadApiKey } from "./lib/secrets";
 import { completeOnce, completeShort } from "./lib/agentSession";
@@ -170,6 +171,8 @@ export function App() {
       onHook: (event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`),
       ask: (req) => new Promise<Remember>((resolve) => setPermissions((q) => [...q, { req, resolve }])),
       diagnostics: async (files) => errorMarkers(dir, files),
+      // Only the main checkout has a language server; an isolated thread (its own worktree) has none to ask.
+      checkFile: extra?.stateDir ? undefined : (rel, text) => lsp.current.check(`${dir}/${rel}`, languageForPath(rel), text),
       askQuestions: (questions) => new Promise<string[]>((resolve) => setQuestionReq({ questions, resolve })),
       askAddFile: (question, path) => new Promise<boolean>((resolve) => setAddFileReq({ question, path, resolve })),
       onPlanWritten: (slug) => {
