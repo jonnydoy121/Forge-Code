@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Editor } from "./components/Editor";
+import { EmptyEditor } from "./components/EmptyEditor";
 import { FileTree } from "./components/FileTree";
 import { TabBar } from "./components/TabBar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -198,7 +199,6 @@ export function App() {
     preloadMonaco(); // warm the editor engine in the background so the first file opens instantly
     void diskFs.list(`${dir}/.forge/worktrees`).then((names) => names.length > 0 && setThreadMsg(`Unmerged thread checkouts from an earlier session: ${names.join(", ")} (branches forge/<name>). Merge or remove them with git; they are not reopened as threads.`)).catch(() => {});
     if (svc.hookErrors.length) setNotice(`.forge/hooks.json: ${svc.hookErrors.join("; ")}`);
-    void svc.proposeCommandsSection().catch(() => {});
     void svc.plans.list().then((l) => setActivePlan(l[0]?.slug ?? null));
     setIndexInfo({ progress: "starting" });
     const st = loadSettings();
@@ -459,7 +459,8 @@ export function App() {
               />
             </div>
           )}
-          <div className={`min-h-0 flex-1 ${view !== "editor" ? "hidden" : ""}`}>
+          <div className={`relative min-h-0 flex-1 ${view !== "editor" ? "hidden" : ""}`}>
+            {!tabs.active && view === "editor" && <EmptyEditor hasFolder={!!root} agentOpen={agentOpen} />}
             <Editor
               path={tabs.active}
               dark={dark}
@@ -599,7 +600,7 @@ export function App() {
         )}
       </div>
       <footer className="flex gap-4 border-t border-[var(--border)] bg-[var(--panel)] px-3 py-0.5 text-xs text-[var(--muted)]" data-testid="status">
-        <span>{root ?? "No folder open"}</span>
+        <span title={root ?? undefined} data-testid="root-name" className="max-w-[16rem] truncate">{root ? (root.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root) : "No folder open"}</span>
         <span data-testid="index-status" title={indexInfo.status ? `${indexInfo.status.symbols} symbols, ${indexInfo.status.chunks} chunks` : ""}>
           {indexInfo.progress ? `Indexing: ${indexInfo.progress}` : indexInfo.status ? `Indexed ${indexInfo.status.indexed_files} files` : ""}
         </span>

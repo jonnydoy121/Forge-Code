@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+### UI: settings, header, first run, status bar
+- Settings are grouped under headings (Model, Edits and limits, Privacy and safety, Assistance, Context), laid out as aligned label/control rows, and scroll inside the panel instead of pushing the conversation off screen.
+- Checkpoints, Audit and Settings are real buttons. Run checks and Detect commands moved from above the conversation to the composer footer.
+- An empty editor now says what to do first, with the real shortcuts, and disappears when a file opens.
+- Opening a folder no longer proposes an AGENTS.md change by itself, so a fresh workspace has nothing pending; Detect commands still does it on request.
+- The status bar shows the folder's name (full path on hover) instead of the whole path.
+Test: `ui.spec.ts`.
+
 ### UI: readable replies, fitting review controls
 - Assistant replies are formatted: code blocks (with a Copy button and language label), inline code, bold/italic, headings and lists. A streaming reply with an unfinished code fence renders as code immediately. Text is built from React elements only, so HTML in a reply is shown as text and never runs (tested in the real window, including an `<img onerror>` payload); links show their address on hover and never navigate the app.
 - The review pane's per-hunk buttons wrap instead of being clipped in narrow panes. `screens.spec.ts` captures the main screens for design review (`FORGE_SCREENS=<dir>`).

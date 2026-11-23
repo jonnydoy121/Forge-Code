@@ -82,6 +82,31 @@ interface Props {
   isolated?: boolean;
 }
 
+const FIELD = "min-w-0 flex-1 rounded bg-[var(--hover)] px-1 py-0.5";
+
+function SettingsHeading({ children, first }: { children: React.ReactNode; first?: boolean }) {
+  return <h3 className={`${first ? "" : "mt-3 border-t border-[var(--border)] pt-2"} text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]`}>{children}</h3>;
+}
+
+/** A label and its control(s) on one aligned row. */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="grid grid-cols-[6.5rem_1fr] items-center gap-2">
+      <span>{label}</span>
+      <span className="flex min-w-0 items-center gap-2">{children}</span>
+    </label>
+  );
+}
+
+function Check({ checked, onChange, testId, children }: { checked: boolean; onChange: (v: boolean) => void; testId?: string; children: React.ReactNode }) {
+  return (
+    <label className="flex items-start gap-2">
+      <input type="checkbox" className="mt-0.5" data-testid={testId} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{children}</span>
+    </label>
+  );
+}
+
 export function AgentPanel({ root, activePath, services, pendingCount, version, onOpenReview, onFilesChanged, registerSend, externalReport, onReport, onHook, activePlanSlug, onStartBuild, threadId = "main", active = true, onBusyChange, isolated = false }: Props) {
   const [settings, setSettings] = useState<AgentSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState(false);
@@ -433,59 +458,59 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
         <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={offMachine ? "Prompts and attached code are sent to a remote server" : "Local model: nothing leaves this machine"}>
           {offMachine ? "remote" : "local"}
         </span>
-        <button className="text-xs underline" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
-        <button className="text-xs underline" onClick={() => { setShowAudit((s) => !s); setShowTimeline(false); }}>Audit</button>
-        <button className="text-xs underline" onClick={() => setShowSettings((s) => !s)} data-testid="settings-toggle">Settings</button>
+        <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
+        <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" onClick={() => { setShowAudit((s) => !s); setShowTimeline(false); }}>Audit</button>
+        <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" aria-pressed={showSettings} onClick={() => setShowSettings((s) => !s)} data-testid="settings-toggle">Settings</button>
       </header>
 
       {showSettings && (
-        <div className="space-y-1 border-b border-[var(--border)] p-3 text-xs" data-testid="settings">
-          <label className="block">Provider
-            <select className="ml-2 rounded bg-[var(--hover)]" value={settings.provider} onChange={(e) => update({ provider: e.target.value as AgentSettings["provider"], model: DEFAULT_MODELS[e.target.value as AgentSettings["provider"]] })}>
+        <div className="max-h-[60vh] space-y-1 overflow-auto border-b border-[var(--border)] p-3 text-xs" data-testid="settings">
+          <SettingsHeading first>Model</SettingsHeading>
+          <Row label="Provider">
+            <select className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.provider} onChange={(e) => update({ provider: e.target.value as AgentSettings["provider"], model: DEFAULT_MODELS[e.target.value as AgentSettings["provider"]] })}>
               <option value="ollama">Ollama (local)</option>
               <option value="anthropic">Anthropic</option>
               <option value="openai">OpenAI-compatible</option>
             </select>
-          </label>
-          <label className="block">Model <input className="ml-2 w-52 rounded bg-[var(--hover)] px-1" value={settings.model} onChange={(e) => update({ model: e.target.value })} /></label>
-          <label className="block">Base URL <input data-testid="base-url" className="ml-2 w-52 rounded bg-[var(--hover)] px-1" placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></label>
-          <label className="block">API key <input type="password" className="ml-2 w-52 rounded bg-[var(--hover)] px-1" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></label>
-          <label className="block">Edits
-            <select data-testid="review-mode" className="ml-2 rounded bg-[var(--hover)]" value={settings.reviewMode} onChange={(e) => update({ reviewMode: e.target.value as AgentSettings["reviewMode"] })}>
+          </Row>
+          <Row label="Model"><input className={FIELD} value={settings.model} onChange={(e) => update({ model: e.target.value })} /></Row>
+          <Row label="Base URL"><input data-testid="base-url" className={FIELD} placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></Row>
+          <Row label="API key"><input type="password" className={FIELD} value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></Row>
+          <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>
+
+          <SettingsHeading>Edits and limits</SettingsHeading>
+          <Row label="Edits">
+            <select data-testid="review-mode" className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.reviewMode} onChange={(e) => update({ reviewMode: e.target.value as AgentSettings["reviewMode"] })}>
               <option value="review">Review every edit</option>
               <option value="plan-files">Auto-apply files in the plan</option>
               <option value="auto">Auto-apply everything (checkpointed)</option>
             </select>
-          </label>
-          <label className="block">Max steps <input type="number" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={settings.maxSteps} onChange={(e) => update({ maxSteps: Number(e.target.value) || 12 })} /> Max $ <input type="number" step="0.5" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={settings.maxCostUsd} onChange={(e) => update({ maxCostUsd: Number(e.target.value) || 2 })} /></label>
-          <label className="block">Context budget <input type="number" data-testid="budget-tokens" className="ml-2 w-24 rounded bg-[var(--hover)] px-1" value={settings.budgetTokens} onChange={(e) => update({ budgetTokens: Number(e.target.value) || 100000 })} /> compact at <input type="number" step="0.05" min="0.3" max="0.95" className="w-14 rounded bg-[var(--hover)] px-1" value={settings.compactionThreshold} onChange={(e) => update({ compactionThreshold: Number(e.target.value) || 0.8 })} /></label>
-          <label className="block"><input type="checkbox" data-testid="auto-memories" checked={settings.autoMemories} onChange={(e) => update({ autoMemories: e.target.checked })} /> Let the agent create memories itself (you always see them; off by default)</label>
-          <label className="block">Your rules (every project, lowest precedence)
+          </Row>
+          <Row label="Max steps"><input type="number" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.maxSteps} onChange={(e) => update({ maxSteps: Number(e.target.value) || 12 })} /><span className="text-[var(--muted)]">Max $</span><input type="number" step="0.5" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.maxCostUsd} onChange={(e) => update({ maxCostUsd: Number(e.target.value) || 2 })} /></Row>
+          <Row label="Max minutes"><input type="number" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /><span className="text-[var(--muted)]">per run</span></Row>
+          <Row label="Context"><input type="number" data-testid="budget-tokens" className="w-24 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.budgetTokens} onChange={(e) => update({ budgetTokens: Number(e.target.value) || 100000 })} /><span className="text-[var(--muted)]">tokens, compact at</span><input type="number" step="0.05" min="0.3" max="0.95" className="w-14 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.compactionThreshold} onChange={(e) => update({ compactionThreshold: Number(e.target.value) || 0.8 })} /></Row>
+
+          <SettingsHeading>Privacy and safety</SettingsHeading>
+          <Check testId="local-only" checked={settings.localOnly} onChange={(v) => update({ localOnly: v })}>Local-only mode: block every request that would leave this machine</Check>
+          <Check testId="sandbox-on" checked={settings.sandbox} onChange={(v) => update({ sandbox: v })}>Run agent commands in the OS sandbox (workspace only, no network)</Check>
+          <Check checked={settings.toolchainRead} onChange={(v) => update({ toolchainRead: v })}>Let the sandbox read tool folders on PATH (adds read-only access for node, git, ...)</Check>
+
+          <SettingsHeading>Assistance</SettingsHeading>
+          <Check testId="completions-toggle" checked={settings.completions} onChange={(v) => update({ completions: v })}>Ghost-text completions while typing (sends the code around your cursor to the model every time you pause{sendsCodeOffMachine(settings) ? "; this provider is NOT on this machine" : ""})</Check>
+          {settings.completions && (
+            <Row label="Completion model"><input className={FIELD} data-testid="completion-model" placeholder={settings.model} value={settings.completionModel} onChange={(e) => update({ completionModel: e.target.value })} /></Row>
+          )}
+          <Check testId="auto-memories" checked={settings.autoMemories} onChange={(v) => update({ autoMemories: v })}>Let the agent create memories itself (you always see them; off by default)</Check>
+
+          <SettingsHeading>Context</SettingsHeading>
+          <Row label="Embeddings"><input className={FIELD} data-testid="embed-model" placeholder="nomic-embed-text" value={settings.embedModel} onChange={(e) => update({ embedModel: e.target.value })} /></Row>
+          <p className="text-[var(--muted)]">Local Ollama model; applies on the next workspace open. Empty uses the built-in one.</p>
+          <label className="block">Your rules <span className="text-[var(--muted)]">(every project, lowest precedence)</span>
             <textarea data-testid="user-rules" className="mt-1 h-16 w-full rounded bg-[var(--hover)] p-1" value={settings.userRules} onChange={(e) => update({ userRules: e.target.value })} />
           </label>
-          <label className="block"><input type="checkbox" data-testid="local-only" checked={settings.localOnly} onChange={(e) => update({ localOnly: e.target.checked })} /> Local-only mode: block every request that would leave this machine</label>
-          <label className="block"><input type="checkbox" data-testid="sandbox-on" checked={settings.sandbox} onChange={(e) => update({ sandbox: e.target.checked })} /> Run agent commands in the OS sandbox (workspace only, no network)</label>
-          <label className="block"><input type="checkbox" data-testid="completions-toggle" checked={settings.completions} onChange={(e) => update({ completions: e.target.checked })} /> Ghost-text completions while typing (sends the code around your cursor to the model every time you pause{sendsCodeOffMachine(settings) ? "; this provider is NOT on this machine" : ""})</label>
-          {settings.completions && (
-            <label className="block">Completion model (small and fast works best; empty = the agent model)
-              <input className="mt-0.5 w-full rounded bg-neutral-900 px-1" data-testid="completion-model" placeholder={settings.model} value={settings.completionModel} onChange={(e) => update({ completionModel: e.target.value })} />
-            </label>
-          )}
-          <label className="block">Embedding model (local Ollama, applies on next workspace open; empty = built-in)
-            <input className="mt-0.5 w-full rounded bg-neutral-900 px-1" data-testid="embed-model" placeholder="nomic-embed-text" value={settings.embedModel} onChange={(e) => update({ embedModel: e.target.value })} />
-          </label>
-          <label className="block"><input type="checkbox" checked={settings.toolchainRead} onChange={(e) => update({ toolchainRead: e.target.checked })} /> Let the sandbox read tool folders on PATH (adds read-only access for node, git, ...)</label>
-          <label className="block">Max minutes per run <input type="number" className="ml-2 w-16 rounded bg-[var(--hover)] px-1" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /></label>
-          <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>
         </div>
       )}
 
-      {services && (
-        <div className="flex gap-2 border-b border-[var(--border)] px-3 py-1 text-xs">
-          <button className="underline" data-testid="run-checks" onClick={() => void services.runVerification("full").catch((e) => setItems((i) => [...i, { kind: "notice", text: `Checks failed to run: ${e}` }]))}>Run checks</button>
-          <button className="underline" data-testid="detect-commands" onClick={() => void services.proposeCommandsSection().then((r) => setItems((i) => [...i, { kind: "notice", text: r === "proposed" ? "Proposed a ## Commands section in AGENTS.md for review." : r === "exists" ? "AGENTS.md already has a ## Commands section." : "No project commands detected." }]))}>Detect commands</button>
-        </div>
-      )}
       {pendingCount > 0 && (
         <button className="border-b border-[var(--border)] bg-amber-900/30 px-3 py-1 text-left text-xs text-amber-200" onClick={onOpenReview} data-testid="pending-banner">
           {pendingCount} file{pendingCount === 1 ? "" : "s"} with pending changes. Click to review.
@@ -679,7 +704,13 @@ ${diff}`);
           <span data-testid="token-meter" title={breakdown}>{meter ? `${meter.total.toLocaleString()} tokens${meter.calibrated ? "" : " (est.)"}` : "0 tokens"}</span>
           <span data-testid="cost">${cost.toFixed(4)}</span>
           {runtimeKind && <span data-testid="runtime-kind" title="Where the agent loop runs">agent: {runtimeKind}</span>}
-          {busy && <button className="ml-auto underline" onClick={() => abort.current?.abort()}>Stop</button>}
+          {services && (
+            <span className="ml-auto flex items-center gap-1">
+          <button className="rounded px-1.5 py-0.5 hover:bg-[var(--hover)]" data-testid="run-checks" onClick={() => void services.runVerification("full").catch((e) => setItems((i) => [...i, { kind: "notice", text: `Checks failed to run: ${e}` }]))}>Run checks</button>
+          <button className="rounded px-1.5 py-0.5 hover:bg-[var(--hover)]" data-testid="detect-commands" onClick={() => void services.proposeCommandsSection().then((r) => setItems((i) => [...i, { kind: "notice", text: r === "proposed" ? "Proposed a ## Commands section in AGENTS.md for review." : r === "exists" ? "AGENTS.md already has a ## Commands section." : "No project commands detected." }]))}>Detect commands</button>
+            </span>
+          )}
+          {busy && <button className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)]" onClick={() => abort.current?.abort()}>Stop</button>}
         </div>
       </footer>
     </aside>
