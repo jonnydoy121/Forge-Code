@@ -16,6 +16,7 @@ import { prewarmRuntime } from "../lib/runtimeProcess";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { parsePrices } from "@forge/model-gateway";
 import { cleanCommitMessage } from "../lib/commitMessage";
+import { approvedPrompt, buildOptionsPrompt, optionLetter, parseOptions, type Option } from "../lib/options";
 import { tierIsRemote, tierSetting, tiersSendOffMachine, unpricedRemoteModels, type TierName } from "../lib/modelRouting";
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
@@ -54,7 +55,8 @@ type Item =
   | { kind: "notice"; text: string }
   | { kind: "report"; report: VerificationReport; source: string }
   | { kind: "injection"; tool: string; findings: { pattern: string; excerpt: string }[] }
-  | { kind: "compaction"; summary: string; removed: number; before: number; after: number };
+  | { kind: "compaction"; summary: string; removed: number; before: number; after: number }
+  | { kind: "options"; request: string; options: Option[]; chosen?: number };
 
 interface Props {
   root: string | null;
@@ -238,6 +240,44 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     if (patch.scoutApiKey !== undefined && next.scoutProvider) void storeApiKey(next.scoutProvider, patch.scoutApiKey);
     if (patch.architectApiKey !== undefined && next.architectProvider) void storeApiKey(next.architectProvider, patch.architectApiKey);
   };
+
+  /** "Options": ask for 2-3 short approaches to the request in the box, show them as cards, and write no code until one is chosen. */
+  async function proposeOptions() {
+    const request = input.trim();
+    if (!request || busy || !services) return;
+    setInput("");
+    setBusy(true);
+    setItems((i) => [...i, { kind: "user", text: request }, { kind: "notice", text: "Working out options. No code is written until you choose one." }]);
+    try {
+      let map: string | null = null;
+      try {
+        map = isolated ? null : await indexBackend.repoMap(activeRef.current ? [activeRef.current] : [], 1000);
+      } catch {
+        /* index not ready: the options are just less grounded */
+      }
+      const reply = await completeOnce(settings, services, buildOptionsPrompt(request, map, activeRef.current));
+      const options = parseOptions(reply);
+      setItems((i) => i.filter((x) => !(x.kind === "notice" && x.text.startsWith("Working out options"))));
+      if (options) setItems((i) => [...i, { kind: "options", request, options }]);
+      else {
+        setItems((i) => [...i, { kind: "notice", text: "The model did not return usable options. Your request is back in the box: send it as usual, or try Options again." }]);
+        setInput(request);
+      }
+    } catch (e) {
+      setItems((i) => [...i.filter((x) => !(x.kind === "notice" && x.text.startsWith("Working out options"))), { kind: "notice", text: `Could not get options: ${e instanceof Error ? e.message : String(e)}` }]);
+      setInput(request);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** One option chosen: only now does the agent run, told to build that approach and not the others. */
+  function chooseOption(itemIndex: number, optionIndex: number) {
+    const item = items[itemIndex];
+    if (!item || item.kind !== "options" || item.chosen !== undefined || busy) return;
+    setItems((all) => all.map((x, k) => (k === itemIndex && x.kind === "options" ? { ...x, chosen: optionIndex } : x)));
+    void send({ prompt: approvedPrompt(item.request, item.options[optionIndex]!, optionIndex), skipSuggest: true });
+  }
 
   async function send(override?: { prompt: string; mode?: Mode; skipSuggest?: boolean }): Promise<RunOutcome> {
     const outcome: RunOutcome = {};
@@ -659,6 +699,25 @@ ${diff}`, { tier: "scout" }));
                 <summary>Context compacted: {it.removed} older messages summarised ({it.before.toLocaleString()} to {it.after.toLocaleString()} tokens). Rules, plan and file list were kept.</summary>
                 <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{it.summary}</pre>
               </details>
+            ) : it.kind === "options" ? (
+              <div key={i} className="space-y-1.5" data-testid="options">
+                {it.options.map((o, k) => (
+                  <div key={k} className={`rounded border p-2 text-xs ${it.chosen === k ? "border-blue-400" : "border-[var(--border)]"} ${it.chosen !== undefined && it.chosen !== k ? "opacity-50" : ""}`} data-testid="option-card">
+                    <div className="flex items-baseline gap-2">
+                      <strong>{optionLetter(k)}. {o.title}</strong>
+                      <span className="rounded bg-[var(--hover)] px-1 text-[var(--muted)]" title="Rough size of the change">{o.size}</span>
+                    </div>
+                    <p className="mt-0.5">{o.summary}</p>
+                    {o.files.length > 0 && <p className="mt-0.5 text-[var(--muted)]">Files: {o.files.join(", ")}</p>}
+                    {o.tradeoff && <p className="mt-0.5 text-[var(--muted)]">Trade-off: {o.tradeoff}</p>}
+                    {it.chosen === undefined ? (
+                      <button className="mt-1 rounded bg-green-700/70 px-2 py-0.5" data-testid="choose-option" disabled={busy} onClick={() => chooseOption(i, k)}>Use option {optionLetter(k)}</button>
+                    ) : it.chosen === k ? (
+                      <span className="mt-1 inline-block text-blue-400" data-testid="option-chosen">Chosen</span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             ) : it.kind === "report" ? (
               <ReportCard key={i} report={it.report} source={it.source} />
             ) : it.kind === "tool" ? (
@@ -725,6 +784,15 @@ ${diff}`, { tier: "scout" }));
               + {activePath.split(/[\\/]/).pop()}
             </button>
           )}
+          <button
+            className="rounded bg-[var(--hover)] px-1.5 text-xs disabled:opacity-40"
+            data-testid="options-button"
+            disabled={!input.trim() || busy || mode === "ask" || !services}
+            title={mode === "ask" ? "Ask mode does not change code, so there is nothing to choose between. Switch to Agent or Plan." : "Get 2 or 3 short approaches first and pick one. Nothing is written until you do."}
+            onClick={() => void proposeOptions()}
+          >
+            Options
+          </button>
           <select aria-label="Attach" data-testid="attach-kind" className="rounded bg-[var(--hover)] px-1 text-xs" value={attachKind} onChange={(e) => {
             const k = e.target.value as Attachment["kind"] | "";
             if (k === "diff" || k === "terminal") { setChips((x) => (x.some((c) => c.kind === k) ? x : [...x, { kind: k, arg: "" }])); setAttachKind(""); } else setAttachKind(k);

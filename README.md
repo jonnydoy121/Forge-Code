@@ -15,6 +15,7 @@ review, everything is reversible, and your code stays on your machine unless you
 - **Parallel, isolated agents.** Several agent threads at once; an isolated thread gets its own git worktree and branch, and you merge or discard it.
 - **Optional inline completions.** Ghost text as you type, off by default and clear about what it sends.
 - **Any model, any agent.** Anthropic, OpenAI-compatible and local (Ollama) models; MCP servers; ACP agents.
+- **Options before code.** Press Options to get 2-3 short approaches to a request, pick one, and only then does the agent write anything.
 - **The right model for each job (optional).** A cheap scout for chores, your main model for the work, a strong architect for plans and for fixes the checks keep rejecting; Anthropic prompt caching is on. See [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md), including what is not verified live.
 - **Fast.** The window is interactive in about 0.1 s (only 355 KB of JavaScript at startup); a 120,000-file repo indexes in about 5 s and a semantic search over it takes about 7 ms. Measurements and method: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 

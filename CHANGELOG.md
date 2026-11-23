@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Options before code
+- New **Options** button beside Attach (Agent and Plan mode): the main model proposes 2-3 short approaches to the request in the box (title, how it works, files, trade-off, size; no code), shown as cards. **Use option B** then runs the agent on that approach only. Nothing is generated for the options not picked (a real-window test counts the requests: one options call, one run). An unusable reply puts the request back in the box. See `docs/MODEL-ROUTING.md`.
+- Measured with real local models (`options.live.test.ts`): the 7B gave usable options 4 of 4; the 1.5B failed once, on a bare JSON array in a code fence, which exposed a parser bug that is now fixed and tested.
+- Tests: prompt, parser and approved-prompt units (11), and `options.spec.ts` in the real window (the agent is told only the chosen approach; red when it is not).
+
 ### Local models can now use tools; prices you can set; scout safety
 - **Fixed: agent mode with the default local model could not edit anything.** `qwen2.5-coder` (7B and 1.5B) through Ollama picks the right tool and arguments but writes the call as JSON *text* rather than the structured `tool_calls` field, so the loop took it for an answer and ran nothing. Measured on this machine with a new opt-in test (`scout.live.test.ts`, `FORGE_LIVE_SCOUT=<model>`): 0 of 18 small tasks passed with zero tool calls for each model; after the fix the 7B passes 13 of 18 and the 1.5B 4 of 18. A reply is read back as tool calls only when the whole of it is calls to tools that were offered (prose with JSON in it, a made-up tool, or a cut-off call stays an answer); ordinary text still streams as it arrives. Details and the triage and commit-message measurements: `docs/MODEL-ROUTING.md`.
 - **Prices you can set.** The Max $ limit and the cost meter now use prices you type for models the built-in table lacks (Settings > Model prices, one line per model). A remote model with no price is flagged in settings and beside the cost in the panel; models on this machine stay free.

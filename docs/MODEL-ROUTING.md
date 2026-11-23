@@ -47,6 +47,23 @@ model, so the architect model takes over."), and the audit log records the model
   cached. OpenAI-compatible providers cache prefixes by themselves; the usage they report is read the same way.
 - One API key is kept per provider kind, so two tiers on the same provider with different endpoints share a key.
 
+## Options before code
+
+For a request with more than one reasonable way to do it, type it in Agent or Plan mode and press **Options** (next to Attach) instead of Enter.
+The main model is asked for 2 or 3 short approaches, as JSON and with no code: a title, how it works, the files it would probably change, what you
+give up, and a rough size. It is given the repo map and the file you have open, so the files are real ones. They appear as cards in the panel.
+**Use option B** then runs the agent on that approach alone: it is told the request, the chosen approach and its files, and not to build the others.
+
+- **Nothing is generated for the options you do not pick.** The whole step is one short model call (a few hundred tokens) plus the one run you choose;
+  a test counts the requests that reach the model.
+- The "preview" is the files list, the trade-off and the size, not rendered output: a code editor has no scene to preview before code exists.
+- It uses the **main model**, not the scout: the measurements below show a small model's approaches can be generic, and picking the approach is the
+  decision that steers everything after it.
+- If the reply cannot be read as at least two options, your request goes back in the box and nothing is lost. Ask mode does not change code, so the
+  button is off there.
+- Measured with real local models (4 requests): `qwen2.5-coder:7b` gave usable, specific options 4 of 4 times in 1.2-3.4 s; `qwen2.5-coder:1.5b` 4 of 4
+  once the parser accepted the bare JSON array it sometimes returns, in about half a second, with more generic approaches. Not measured with a hosted model.
+
 ## Measured: small local models as the scout
 
 Run on this development machine (RTX 5070 Ti, Ollama, default sampling) with `FORGE_LIVE_SCOUT=<model> npx vitest run packages/agent-runtime/test/scout.live`
