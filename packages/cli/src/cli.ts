@@ -26,6 +26,7 @@ export interface Options {
   command: "ask" | "run";
   prompt: string;
   provider: ProviderConfig["kind"];
+  preset?: string;
   model: string | undefined;
   baseUrl: string | undefined;
   apply: boolean;
@@ -46,7 +47,7 @@ Usage:
 
 Options:
   --model <name>        model to use (or FORGE_MODEL)
-  --provider <kind>     ollama (default), openai or anthropic (or FORGE_PROVIDER)
+  --provider <kind>     ollama (default), openai, anthropic, or a preset: gemini, openrouter, groq, lmstudio (or FORGE_PROVIDER)
   --base-url <url>      API base URL (or FORGE_BASE_URL)
   --allow <command>     let the agent run this command (repeatable; a trailing * allows any arguments but never
                         chained or redirected commands). Nothing runs unless allowed, e.g. --allow "npm test"
@@ -60,6 +61,27 @@ Exit codes: 0 done, 1 error, 2 stopped at a limit.
 `;
 
 const KINDS = ["ollama", "openai", "anthropic"] as const;
+/** Named OpenAI-compatible endpoints: choosing one sets the provider to openai and the default base URL. The key comes from FORGE_API_KEY or the preset's own variable, never from another provider's. */
+export const PRESETS: Record<string, { baseUrl: string; keyEnv?: string }> = {
+  gemini: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: "GEMINI_API_KEY" },
+  openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
+  groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
+  lmstudio: { baseUrl: "http://localhost:1234/v1" },
+};
+const KIND_LIST = [...KINDS, ...Object.keys(PRESETS)].join(", ");
+
+function setProvider(o: Options, v: string): boolean {
+  if ((KINDS as readonly string[]).includes(v)) {
+    o.provider = v as Options["provider"];
+    o.preset = undefined;
+    return true;
+  }
+  const preset = PRESETS[v];
+  if (!preset) return false;
+  o.provider = "openai";
+  o.preset = v;
+  return true;
+}
 
 export function parseArgs(argv: string[], env: Record<string, string | undefined>): Options | { error: string } | { help: true } {
   const o: Options = {
@@ -75,8 +97,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
     maxCostUsd: 2,
   };
   if (env.FORGE_PROVIDER) {
-    if (!(KINDS as readonly string[]).includes(env.FORGE_PROVIDER)) return { error: `FORGE_PROVIDER must be one of ${KINDS.join(", ")}` };
-    o.provider = env.FORGE_PROVIDER as Options["provider"];
+    if (!setProvider(o, env.FORGE_PROVIDER)) return { error: `FORGE_PROVIDER must be one of ${KIND_LIST}` };
   }
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -95,8 +116,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
       else if (a === "--base-url") o.baseUrl = value();
       else if (a === "--provider") {
         const v = value();
-        if (!(KINDS as readonly string[]).includes(v)) return { error: `--provider must be one of ${KINDS.join(", ")}` };
-        o.provider = v as Options["provider"];
+        if (!setProvider(o, v)) return { error: `--provider must be one of ${KIND_LIST}` };
       } else if (a === "--max-steps") {
         const n = Math.floor(Number(value()));
         if (!(n >= 1)) return { error: "--max-steps must be a whole number of at least 1" };
@@ -119,6 +139,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   if (!o.prompt) return { error: `"${cmd}" needs a prompt` };
   if (o.apply && cmd === "ask") return { error: "--apply only makes sense with run" };
   if (o.allow.length && cmd === "ask") return { error: "--allow only makes sense with run" };
+  if (o.preset && !o.baseUrl) o.baseUrl = PRESETS[o.preset]!.baseUrl;
   return o;
 }
 
@@ -134,7 +155,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
     io.gateway ??
     (() => {
       const g = new Gateway({ fetch: (u, i) => fetch(u, i as RequestInit) as never });
-      g.register("default", { kind: o.provider, baseUrl: o.baseUrl, apiKey: io.env.FORGE_API_KEY ?? (o.provider === "anthropic" ? io.env.ANTHROPIC_API_KEY : o.provider === "openai" ? io.env.OPENAI_API_KEY : undefined) });
+      g.register("default", { kind: o.provider, baseUrl: o.baseUrl, apiKey: io.env.FORGE_API_KEY ?? (o.preset ? (PRESETS[o.preset]!.keyEnv ? io.env[PRESETS[o.preset]!.keyEnv!] : undefined) : o.provider === "anthropic" ? io.env.ANTHROPIC_API_KEY : o.provider === "openai" ? io.env.OPENAI_API_KEY : undefined) });
       return g;
     })();
 

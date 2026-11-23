@@ -36,7 +36,7 @@ describe("arguments", () => {
     expect(parseArgs(["run"], {})).toEqual({ error: '"run" needs a prompt' });
     expect(parseArgs(["ask", "x", "--apply"], {})).toEqual({ error: "--apply only makes sense with run" });
     expect(parseArgs(["run", "x", "--max-cost", "-1"], {})).toEqual({ error: "--max-cost must be a positive number of dollars" });
-    expect(parseArgs(["run", "x", "--provider", "bogus"], {})).toEqual({ error: "--provider must be one of ollama, openai, anthropic" });
+    expect(parseArgs(["run", "x", "--provider", "bogus"], {})).toEqual({ error: "--provider must be one of ollama, openai, anthropic, gemini, openrouter, groq, lmstudio" });
     expect(parseArgs(["--help"], {})).toEqual({ help: true });
   });
 });
@@ -218,5 +218,20 @@ describe("user skills in the CLI", () => {
     expect(sent).toContain("standup: Write my standup");
     expect(sent).toContain("release: REPO release");
     expect(sent).not.toContain("PERSONAL release");
+  });
+});
+
+describe("provider presets", () => {
+  it("a preset means an OpenAI-compatible provider at its own address", () => {
+    const o = parseArgs(["ask", "hi", "--provider", "gemini"], {}) as { provider: string; baseUrl: string; preset: string };
+    expect(o).toMatchObject({ provider: "openai", preset: "gemini" });
+    expect(o.baseUrl).toContain("generativelanguage.googleapis.com");
+    expect((parseArgs(["ask", "hi", "--provider", "lmstudio"], {}) as { baseUrl: string }).baseUrl).toBe("http://localhost:1234/v1");
+  });
+
+  it("an explicit base URL wins, and an unknown provider is refused naming the presets", () => {
+    expect((parseArgs(["ask", "hi", "--provider", "groq", "--base-url", "http://x/v1"], {}) as { baseUrl: string }).baseUrl).toBe("http://x/v1");
+    expect(parseArgs(["ask", "hi", "--provider", "nope"], {})).toMatchObject({ error: expect.stringContaining("gemini") });
+    expect(parseArgs(["ask", "hi"], { FORGE_PROVIDER: "openrouter" })).toMatchObject({ preset: "openrouter" });
   });
 });
