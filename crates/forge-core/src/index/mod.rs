@@ -97,7 +97,7 @@ impl Phases {
     }
     fn mark(&mut self, name: &'static str) {
         let now = self.start.elapsed().as_millis();
-        self.out.push((name, now - self.last));
+        self.out.push((name, now.saturating_sub(self.last)));
         self.last = now;
     }
     /// Record time measured elsewhere (summed over many batches) as its own phase.
@@ -546,9 +546,22 @@ impl Index {
             };
             let produced = produce();
             drop(tx); // no more batches: let the writer finish
-            let write_ms = writer.join().map_err(|_| "the index writer thread panicked".to_string())??;
-            produced?;
-            Ok(write_ms)
+            let written = writer.join().map_err(|_| "the index writer thread panicked".to_string()).and_then(|r| r);
+            match written {
+                Ok(write_ms) => {
+                    produced?;
+                    Ok(write_ms)
+                }
+                Err(e) => {
+                    // Batches were applied to memory while the writer was still storing them, so memory may hold files the database never
+                    // stored. Forget them all: memory must never claim more than the database has, and the next build starts from what is
+                    // really stored (and re-indexes the rest).
+                    let mut st = self.state.write().unwrap();
+                    let building = st.building;
+                    *st = State { building, ..State::default() };
+                    Err(e)
+                }
+            }
         });
         let t_write = written?;
         phases.record("parse + embed (all cores)", t_parse);

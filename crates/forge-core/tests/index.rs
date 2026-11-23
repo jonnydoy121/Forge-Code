@@ -342,3 +342,23 @@ fn find_files_matches_globs_and_plain_substrings_and_skips_excluded_files() {
     assert!(idx.find_files("[", 100).unwrap().is_empty());
     assert!(idx.find_files("{", 100).is_err(), "a malformed glob is an error, not a panic");
 }
+
+#[test]
+fn a_failed_database_write_never_leaves_memory_claiming_files_the_database_lacks() {
+    let root = fixture();
+    let db = tempfile::tempdir().unwrap();
+    let path = db.path().join("i.db");
+    let idx = open(root.path(), &path);
+    idx.build(&|_| {}).unwrap();
+    assert!(idx.status().indexed_files > 0);
+
+    // Break the database underneath the index so that the next write fails, then give the index something to write.
+    rusqlite::Connection::open(&path).unwrap().execute_batch("ALTER TABLE files RENAME TO files_gone").unwrap();
+    write(root.path(), "src/brand_new.ts", "export const brandNew = 1;\n");
+    assert!(idx.build(&|_| {}).is_err(), "the failed write must be reported");
+
+    // Memory was reset rather than left ahead of the database: nothing is claimed that was not stored.
+    assert_eq!(idx.status().indexed_files, 0);
+    assert!(idx.symbol("brandNew").is_empty());
+    assert!(!idx.status().building, "a failed build must not leave the index marked as building");
+}

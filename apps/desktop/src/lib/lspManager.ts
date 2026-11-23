@@ -37,6 +37,7 @@ export class LspManager {
   async setRoot(root: string | null) {
     await this.stopAll();
     this.opened.clear();
+    this.tracker.reset();
     this.root = root;
   }
 
@@ -89,6 +90,7 @@ export class LspManager {
 
   async change(path: string, language: string, version: number, text: string) {
     this.opened.set(normalizeUri(pathToUri(path)), { language, version, text });
+    this.tracker.markDirty(pathToUri(path)); // the diagnostics we hold are for the previous text until the server publishes again
     const s = await this.ensure(language);
     s?.client.changeDocument(pathToUri(path), version, text);
   }

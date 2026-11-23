@@ -24,6 +24,8 @@ export class DiagnosticsTracker {
   /** Probe documents currently open on the server, and every probe uri ever used (their diagnostics are never the editor's business). */
   private probing = new Set<string>();
   private shadows = new Set<string>();
+  /** Files whose text changed in the editor and that the server has not published for since: the cached diagnostics describe older text. */
+  private dirty = new Set<string>();
   private queue = new Map<string, Promise<unknown>>();
 
   /** `timeoutMs`: give up waiting for the server. `settleMs`: servers publish in several rounds, so wait for quiet before answering. */
@@ -37,13 +39,29 @@ export class DiagnosticsTracker {
       return false;
     }
     this.latest.set(key, diagnostics);
+    this.dirty.delete(key); // the server has spoken since the last change
     this.listeners.get(key)?.forEach((l) => l(diagnostics));
     return true;
   }
 
   /** The editor closed the file: what we knew about it is no longer current. */
   forget(uri: string) {
-    this.latest.delete(normalizeUri(uri));
+    const key = normalizeUri(uri);
+    this.latest.delete(key);
+    this.dirty.delete(key);
+  }
+
+  /** The editor changed this file's text: what we have cached for it is out of date until the server publishes again. */
+  markDirty(uri: string) {
+    const key = normalizeUri(uri);
+    this.latest.delete(key);
+    this.dirty.add(key);
+  }
+
+  /** Forget everything cached (the workspace changed, so the servers did). */
+  reset() {
+    this.latest.clear();
+    this.dirty.clear();
   }
 
   /** Resolves with the last diagnostics once the server has been quiet for `settleMs`, or null if it never published. */
@@ -87,7 +105,8 @@ export class DiagnosticsTracker {
 
   private async run(key: string, uri: string, language: string, text: string, client: DocClient, current: () => OpenDoc | undefined): Promise<FileCheck> {
     const open = current();
-    if (open && open.text === text) {
+    // Served from the live diagnostics only when they describe this text: a change the server has not answered yet is probed instead.
+    if (open && open.text === text && !this.dirty.has(key)) {
       const cached = this.latest.get(key);
       if (cached) return { status: "ok", diagnostics: cached };
       const d = await this.wait(key);

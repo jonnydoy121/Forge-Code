@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Fixes from a second review (the Rust indexer and the desktop lib)
+- **A failed database write left the index claiming files it had not stored.** Since index writes were pipelined, the in-memory index was updated while the writer was still storing batches, so a write error (disk full, a locked database) left memory ahead of the database until a restart. Before the pipelining, a failed write stopped before touching memory. Memory is now reset on a write failure, so it never claims more than the database has. A test breaks the database underneath the index to force the failure (memory held 10 files after the failed write before the fix, 0 after).
+- **The agent's `diagnostics` check could answer for older text.** Right after the editor's text changed, and before the language server had published again, the cached diagnostics described the previous text, so a file the agent had just broken could be reported as having no problems. A changed file is now marked dirty and checked fresh until the server answers; the cache is also cleared when the workspace changes. Three tests.
+- Hardened the index phase timer with a saturating subtraction (it cannot actually go negative, since the recorded times are wall-clock, but a panic in debug builds was one subtraction away).
+- **Reviewed and left alone:** the empty-row fallback when a parse result cannot be serialised is deliberate and documented (the file is simply re-indexed; serialising these plain structures cannot fail in practice); `find_files` lowercasing 100k paths per call is a few milliseconds, not worth the extra memory; and a nit about two callers of the Claude status check sharing one in-flight question affects only which cache they write to.
+- 589 unit tests, the Rust tests and 56 end-to-end tests pass; clippy and rustfmt are clean.
+
 ### Fixes from a code review of the recent changes
 A review of the TypeScript changes (gateway, text tool calls, find_files; the Rust and desktop-lib changes were not covered) found five things; four were real and are fixed:
 - **`find_files "[id]"` found nothing.** A pattern with `[` was treated as a glob, so a Next.js route segment like `[id]` matched no path. A bracket is now a plain character (a glob needs `*`, `?` or `{`), in both the Rust index and the fallback.

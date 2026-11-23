@@ -51,6 +51,37 @@ describe("DiagnosticsTracker.check", () => {
     expect(uris).toEqual(["file:///C:/ws/src/a.forge-check.ts"]);
   });
 
+  it("does not serve diagnostics for older text: after the editor's text changes and before the server answers, the check probes instead", async () => {
+    const t = new DiagnosticsTracker(500, 10);
+    const { client, calls } = fakeServer(t, () => [err("broken now")]);
+    t.publish(URI, [err("no longer true")]); // diagnostics for the text before the edit
+    t.markDirty(URI); // the editor changed it; the server has not answered yet
+    const open: OpenDoc = { language: "typescript", version: 8, text: "text after the edit" };
+    const r = await t.check(URI, "typescript", "text after the edit", client, () => open);
+    expect(r).toEqual({ status: "ok", diagnostics: [err("broken now")] }); // fresh, not the stale cache
+    expect(calls).toEqual(['open v1 "text after the edit"', "close"]);
+  });
+
+  it("serves the live diagnostics again once the server has published after the change", async () => {
+    const t = new DiagnosticsTracker(500, 10);
+    const { client, calls } = fakeServer(t, () => [err("should not be asked")]);
+    t.markDirty(URI);
+    t.publish(URI, [err("current")]);
+    const open: OpenDoc = { language: "typescript", version: 9, text: "same" };
+    expect(await t.check(URI, "typescript", "same", client, () => open)).toEqual({ status: "ok", diagnostics: [err("current")] });
+    expect(calls).toEqual([]);
+  });
+
+  it("forgets everything it cached when reset (the workspace changed)", async () => {
+    const t = new DiagnosticsTracker(60, 10);
+    const { client } = fakeServer(t, () => []);
+    t.publish(URI, [err("from the old server")]);
+    t.reset();
+    const open: OpenDoc = { language: "typescript", version: 1, text: "same" };
+    // Nothing cached and nothing published: it waits for the server and, hearing nothing, says so rather than serving old results.
+    expect(await t.check(URI, "typescript", "same", client, () => open)).toEqual({ status: "timeout" });
+  });
+
   it("shadow uris sit beside the file and keep its extension", () => {
     expect(shadowUri("file:///C:/ws/src/a.ts")).toBe("file:///C:/ws/src/a.forge-check.ts");
     expect(shadowUri("file:///ws/pkg/mod.py")).toBe("file:///ws/pkg/mod.forge-check.py");
