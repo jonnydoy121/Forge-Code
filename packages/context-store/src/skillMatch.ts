@@ -34,9 +34,26 @@ export interface SkillMatch {
 export interface MatchOptions {
   /** most skills to apply at once (default 2: more crowds the context and the instructions start to conflict) */
   max?: number;
-  /** lowest score that counts (default 3) */
+  /** how picky the match is (default "balanced"; see SKILL_SENSITIVITY) */
+  sensitivity?: SkillSensitivity;
+  /** lowest score that counts; overrides the sensitivity's own */
   minScore?: number;
+  /** skills never applied automatically (they stay available through use_skill) */
+  exclude?: string[];
 }
+
+/**
+ * How picky the match is.
+ * strict: two matching words and a strong score (about three words, or two that are rare). Fewest wrong matches, misses more.
+ * balanced: two matching words (the default).
+ * loose: also a single word that is in the skill's own name. Finds more, but "release the lock" then applies the release skill.
+ */
+export const SKILL_SENSITIVITY = {
+  strict: { minScore: 6, singleNameWord: false },
+  balanced: { minScore: 3, singleNameWord: false },
+  loose: { minScore: 1.5, singleNameWord: true },
+} as const;
+export type SkillSensitivity = keyof typeof SKILL_SENSITIVITY;
 
 /**
  * The skills whose name and description match the task, best first. A skill needs at least two distinct matching words, so a single
@@ -44,7 +61,8 @@ export interface MatchOptions {
  */
 export function matchSkills(task: string, skills: Skill[], opts: MatchOptions = {}): SkillMatch[] {
   const max = opts.max ?? 2;
-  const minScore = opts.minScore ?? 3;
+  const level = SKILL_SENSITIVITY[opts.sensitivity ?? "balanced"] ?? SKILL_SENSITIVITY.balanced;
+  const minScore = opts.minScore ?? level.minScore;
   const taskWords = new Set(words(task));
   if (taskWords.size === 0 || skills.length === 0) return [];
 
@@ -56,10 +74,12 @@ export function matchSkills(task: string, skills: Skill[], opts: MatchOptions = 
 
   const out: SkillMatch[] = [];
   skills.forEach((skill, i) => {
+    if (opts.exclude?.includes(skill.name)) return;
     const d = docs[i]!;
     const matched = [...taskWords].filter((w) => d.text.has(w));
     if (matched.length === 0) return;
-    if (matched.length < 2) return; // one shared word is too often a coincidence: "release the lock", "review this SQL"
+    // One shared word is too often a coincidence ("release the lock", "review this SQL"), unless the level allows a word from the skill's own name.
+    if (matched.length < 2 && !(level.singleNameWord && matched.some((w) => d.name.has(w)))) return;
     const score = matched.reduce((sum, w) => sum + idf(w) * (d.name.has(w) ? 2 : 1), 0);
     if (score >= minScore) out.push({ skill, score, matched });
   });

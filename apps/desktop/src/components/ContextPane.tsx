@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { CLAUDE_AGENT } from "../lib/claudePlan";
 import { latestOnly } from "../lib/latestOnly";
-import { RuleEngine, type AgentDef, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
+import { RuleEngine, matchSkills, type AgentDef, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
+import { loadSettings, saveSettings } from "../lib/settings";
 import type { WorkspaceServices } from "../lib/workspace";
 
 interface Props {
@@ -140,6 +141,15 @@ function AgentsTab({ services, version }: { services: WorkspaceServices; version
 
 function SkillsTab({ services, version, onOpenFile }: { services: WorkspaceServices; version: number; onOpenFile: (path: string) => void }) {
   const [list, setList] = useState<Skill[] | null>(null);
+  const [off, setOff] = useState<string[]>(() => loadSettings().autoSkillsOff);
+  const [trial, setTrial] = useState("");
+  const setSkillAuto = (name: string, on: boolean) => {
+    const next = on ? off.filter((n) => n !== name) : [...off.filter((n) => n !== name), name];
+    setOff(next);
+    saveSettings({ ...loadSettings(), autoSkillsOff: next });
+  };
+  const live = loadSettings();
+  const preview = list && trial.trim() ? matchSkills(trial, list, { max: live.autoSkillsMax, sensitivity: live.autoSkillsSensitivity, exclude: off }) : [];
   useEffect(() => {
     const load = latestOnly(setList);
     load.runOr(services.skills(), () => setList([]));
@@ -152,6 +162,26 @@ function SkillsTab({ services, version, onOpenFile }: { services: WorkspaceServi
         A skill is a folder with a SKILL.md, in <code>.forge/skills/&lt;name&gt;/</code> in this repository (you can commit them) or in your own <code>~/.forge/skills</code>. The agent loads one when a task calls for it. A skill can bundle scripts
         (.js .mjs .cjs .py .sh); you are asked before each one runs, and it runs in the OS sandbox when that is on. Scripts are code, so only use skills from repositories you trust.
       </p>
+      {list && list.length > 0 && (
+        <div className="space-y-1 rounded border border-[var(--border)] p-2">
+          <label className="block">
+            Try a request: which skills would be applied automatically?
+            <input data-testid="skill-preview-input" className="mt-1 block w-full rounded bg-[var(--hover)] px-2 py-1" placeholder="e.g. write the commit message for this change" value={trial} onChange={(e) => setTrial(e.target.value)} />
+          </label>
+          {trial.trim() &&
+            (preview.length === 0 ? (
+              <p className="text-[var(--muted)]" data-testid="skill-preview-none">None. {live.autoSkills ? "The agent can still load a skill itself from the index." : "Automatic skills are off in Settings."}</p>
+            ) : (
+              <ul data-testid="skill-preview">
+                {preview.map((m) => (
+                  <li key={m.skill.name} data-preview-skill={m.skill.name}>
+                    <strong>{m.skill.name}</strong> <span className="text-[var(--muted)]">matches: {m.matched.join(", ")}</span>
+                  </li>
+                ))}
+              </ul>
+            ))}
+        </div>
+      )}
       {list === null ? null : list.length === 0 ? (
         <p data-testid="skills-empty">No skills yet. Create <code>.forge/skills/my-skill/SKILL.md</code> with a <code>description:</code> line and instructions.</p>
       ) : (
@@ -161,7 +191,11 @@ function SkillsTab({ services, version, onOpenFile }: { services: WorkspaceServi
               <div className="flex items-center gap-2">
                 <strong>{s.name}</strong>
                 <span className="rounded bg-[var(--hover)] px-1 text-xs" data-testid="skill-source">{s.source === "project" ? "this repo" : "personal"}</span>
-                <button className="ml-auto underline" onClick={() => onOpenFile(`${s.dir}/SKILL.md`)}>Open SKILL.md</button>
+                <label className="ml-auto flex items-center gap-1 text-xs">
+                  <input type="checkbox" data-testid="skill-auto" checked={!off.includes(s.name)} onChange={(e) => setSkillAuto(s.name, e.target.checked)} />
+                  Apply automatically
+                </label>
+                <button className="underline" onClick={() => onOpenFile(`${s.dir}/SKILL.md`)}>Open SKILL.md</button>
               </div>
               <div className="text-[var(--muted)]">{s.description}</div>
               {s.scripts.length > 0 && (

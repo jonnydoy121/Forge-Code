@@ -55,6 +55,12 @@ export interface AgentSettings {
   scoutEdits: boolean;
   /** put the instructions of skills that clearly cover the request in front of the model, instead of waiting for it to load them */
   autoSkills: boolean;
+  /** most skills applied at once (1 to 3) */
+  autoSkillsMax: number;
+  /** how strong the match must be: strict, balanced or loose */
+  autoSkillsSensitivity: "strict" | "balanced" | "loose";
+  /** skills never applied automatically */
+  autoSkillsOff: string[];
   /** prices for models the built-in table lacks, one per line: `model input-$ output-$` per million tokens */
   customPrices: string;
 }
@@ -114,6 +120,9 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   triage: "off",
   scoutEdits: false,
   autoSkills: true,
+  autoSkillsMax: 2,
+  autoSkillsSensitivity: "balanced",
+  autoSkillsOff: [],
   customPrices: "",
 };
 

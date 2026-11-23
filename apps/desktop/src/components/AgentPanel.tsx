@@ -13,7 +13,7 @@ import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
 import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
 import { prewarmRuntime } from "../lib/runtimeProcess";
-import { DEFAULT_MODELS, ENDPOINT_PRESETS, loadSettings, presetFor, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
+import { DEFAULT_MODELS, ENDPOINT_PRESETS, loadSettings, onSettingsChange, presetFor, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { parsePrices } from "@forge/model-gateway";
 import { cleanCommitMessage } from "../lib/commitMessage";
 import { latestOnly } from "../lib/latestOnly";
@@ -241,6 +241,16 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     }
   }, [settings.scoutProvider, settings.architectProvider]);
 
+  // The Skills tab saves skill switches itself; take them in here so this panel's next save does not write the old ones back.
+  useEffect(
+    () =>
+      onSettingsChange(() => {
+        const s = loadSettings();
+        setSettings((cur) => (JSON.stringify(cur.autoSkillsOff) === JSON.stringify(s.autoSkillsOff) ? cur : { ...cur, autoSkillsOff: s.autoSkillsOff }));
+      }),
+    [],
+  );
+
   useEffect(() => {
     if (!root) return;
     let live = true;
@@ -422,7 +432,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             }
             try {
               const skills = await services.skills();
-              const matched = settings.autoSkills ? matchSkills(promptRef.current, skills) : [];
+              const live = loadSettings(); // read fresh: a toggle in the Skills tab applies to the next request without restarting the session
+              const matched = live.autoSkills ? matchSkills(promptRef.current, skills, { max: live.autoSkillsMax, sensitivity: live.autoSkillsSensitivity, exclude: live.autoSkillsOff }) : [];
               if (matched.length) out.push({ id: "skills-applied", label: "House rules for this request: follow them in your reply. They are instructions to apply, not tools to call", priority: 1, text: renderMatchedSkills(matched) });
               if (skills.length) out.push({ id: "skills", label: "Skills available (load one with use_skill before a task it covers)", priority: 3, text: skillsIndex(skills) });
             } catch {
@@ -656,6 +667,23 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             </select>
           </Row>
           <Check testId="auto-skills" checked={settings.autoSkills} onChange={(v) => update({ autoSkills: v })}>Apply skills automatically when the request clearly matches one (their instructions go in front of the model; the rest stay available to load)</Check>
+          {settings.autoSkills && (
+            <>
+              <Row label="Skill match">
+                <select data-testid="auto-skills-sensitivity" className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.autoSkillsSensitivity} onChange={(e) => update({ autoSkillsSensitivity: e.target.value as AgentSettings["autoSkillsSensitivity"] })}>
+                  <option value="strict">Strict (fewest wrong ones, misses more)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="loose">Loose (one word from the skill's name is enough)</option>
+                </select>
+              </Row>
+              <Row label="Most skills at once">
+                <select data-testid="auto-skills-max" className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.autoSkillsMax} onChange={(e) => update({ autoSkillsMax: Number(e.target.value) })}>
+                  {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </Row>
+              <p className="text-[var(--muted)]">Turn single skills off, and try a request to see which would apply, in Context &gt; Skills.</p>
+            </>
+          )}
           <Check testId="scout-edits" checked={settings.scoutEdits} onChange={(v) => update({ scoutEdits: v })}>Let the scout make small edits too, not only answer questions (only for a model that is good at tool calls: a 1.5B model passed 4 of 18 small edits, a 7B model 13 of 18)</Check>
           {settings.localOnly && (tierIsRemote(settings, "scout") || tierIsRemote(settings, "architect")) && <p className="text-amber-400" data-testid="routing-local-only-note">Local-only mode is on, so a remote scout or architect is skipped and the main model is used.</p>}
 

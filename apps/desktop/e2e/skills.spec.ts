@@ -183,3 +183,55 @@ for (const on of [true, false]) {
     }
   });
 }
+
+test("the Skills tab previews what would apply, and a skill switched off is no longer applied", async () => {
+  const dir = skillWorkspace();
+  const { srv, bodies, port } = await modelServer();
+  try {
+    const page = await openWorkspace(dir);
+    await page.keyboard.press("Control+Shift+K");
+    await page.getByTestId("ctx-tab-skills").click();
+    await page.getByTestId("skill-preview-input").fill("write a greeting file for the world");
+    await expect(page.locator('[data-preview-skill="greet"]')).toContainText("matches:");
+    await page.getByTestId("skill-preview-input").fill("explain what a closure is");
+    await expect(page.getByTestId("skill-preview-none")).toBeVisible();
+
+    // Switch the skill off: the preview agrees, and the model's request no longer carries its instructions.
+    await page.getByTestId("skill-preview-input").fill("write a greeting file for the world");
+    await page.locator('[data-skill="greet"]').getByTestId("skill-auto").uncheck();
+    await expect(page.getByTestId("skill-preview-none")).toBeVisible();
+    await page.keyboard.press("Control+Shift+K");
+    await page.getByTestId("settings-toggle").click();
+    await page.getByTestId("base-url").fill(`http://127.0.0.1:${port}/v1`);
+    await page.getByTestId("sandbox-on").uncheck();
+    await page.getByTestId("settings-toggle").click();
+    await page.locator('[data-testid="mode-select"]:visible').selectOption("agent");
+    await page.locator('[data-testid="agent-input"]:visible').fill("write a greeting file for the world");
+    await page.locator('[data-testid="agent-input"]:visible').press("Enter");
+    await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("deny").click();
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("all done", { timeout: 30_000 });
+    expect(bodies[0]).not.toContain("House rules from");
+    expect(bodies[0]).toContain("greet: Write a greeting file"); // still in the index
+  } finally {
+    srv.close();
+  }
+});
+
+test("Settings: strict sensitivity stops a one-word match, loose allows it", async () => {
+  const dir = skillWorkspace();
+  const page = await openWorkspace(dir);
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByTestId("ctx-tab-skills").click();
+  // "greeting" alone matches only the skill's name word: loose applies it, balanced and strict do not.
+  await page.getByTestId("skill-preview-input").fill("show me a greeting");
+  await expect(page.getByTestId("skill-preview-none")).toBeVisible();
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("auto-skills-sensitivity").selectOption("loose");
+  await page.getByTestId("settings-toggle").click();
+  await page.keyboard.press("Control+Shift+K");
+  await page.getByTestId("ctx-tab-skills").click();
+  await page.getByTestId("skill-preview-input").fill("show me a greeting");
+  await expect(page.locator('[data-preview-skill="greet"]')).toBeVisible();
+});

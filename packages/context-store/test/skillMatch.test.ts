@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchSkills, renderMatchedSkills, words, type Skill } from "../src";
+import { SKILL_SENSITIVITY, matchSkills, renderMatchedSkills, words, type Skill } from "../src";
 
 const skill = (name: string, description: string, body = `Instructions for ${name}.`): Skill => ({ name, description, body, source: "project", dir: `/r/.forge/skills/${name}`, scripts: [], files: [], declared: {}, problems: [] });
 
@@ -116,5 +116,37 @@ describe("matchSkills", () => {
     expect(text).toContain('House rules from "big" (they apply because the request mentions');
     expect(text.length).toBeLessThan(4400);
     expect(text).toContain("use_skill");
+  });
+});
+
+describe("match controls", () => {
+  it("never applies an excluded skill, but still applies the others", () => {
+    const task = "Write unit tests for the parser and mock the filesystem";
+    expect(matchSkills(task, SKILLS).map((m) => m.skill.name)).toContain("add-unit-tests");
+    expect(matchSkills(task, SKILLS, { exclude: ["add-unit-tests"] }).map((m) => m.skill.name)).not.toContain("add-unit-tests");
+    expect(matchSkills("Write the commit message and pull request description", SKILLS, { exclude: ["add-unit-tests"] }).map((m) => m.skill.name)).toContain("git-commit-style");
+  });
+
+  it("measures the three sensitivity levels (see the printed numbers): strict is the most careful, loose finds the most", () => {
+    const score = (s: keyof typeof SKILL_SENSITIVITY) => {
+      let tp = 0;
+      let fp = 0;
+      let fn = 0;
+      for (const t of TASKS) {
+        const got = matchSkills(t.task, SKILLS, { sensitivity: s }).map((m) => m.skill.name);
+        for (const g of got) {
+          if (t.expect.includes(g)) tp++;
+          else fp++;
+        }
+        for (const w of t.expect) if (!got.includes(w)) fn++;
+      }
+      return { precision: tp / Math.max(1, tp + fp), recall: tp / Math.max(1, tp + fn), fp };
+    };
+    const r = { strict: score("strict"), balanced: score("balanced"), loose: score("loose") };
+    console.log(Object.entries(r).map(([k, v]) => `${k}: precision ${(v.precision * 100).toFixed(0)}%, recall ${(v.recall * 100).toFixed(0)}%, wrong ${v.fp}`).join(" | "));
+    expect(r.strict.fp).toBeLessThanOrEqual(r.balanced.fp);
+    expect(r.strict.recall).toBeLessThan(r.balanced.recall);
+    expect(r.loose.recall).toBeGreaterThanOrEqual(r.balanced.recall);
+    expect(r.loose.fp).toBeGreaterThan(r.balanced.fp);
   });
 });
