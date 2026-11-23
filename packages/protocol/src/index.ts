@@ -31,7 +31,16 @@ export interface Message {
   /** tool messages: which call this answers */
   toolCallId?: string;
 }
-export interface Usage { inputTokens: number; outputTokens: number; costUsd: number }
+export interface Usage {
+  /** Every token of the prompt, whether it was read from a cache, written to one, or processed normally. */
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  /** Prompt tokens served from the provider's cache (already included in inputTokens). */
+  cacheReadTokens?: number;
+  /** Prompt tokens written to the provider's cache (already included in inputTokens). */
+  cacheWriteTokens?: number;
+}
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "tool_call"; call: ToolCall }

@@ -42,7 +42,7 @@ describe("scoped rules are provably applied only to matching files", () => {
     const gw = new ScriptedGateway([[text("ok"), done()]]);
     const rt = new Runtime({ gateway: gw, tools: tools(), provider: "p", model: "m", sections: rulesSections(new RuleEngine(fs, "/r"), () => file) });
     await drain(rt.run({ mode: "ask", prompt: "hello" }));
-    return gw.requests[0]!.messages[0]!.content;
+    return gw.requests[0]!.messages.filter((m) => m.role === "system").map((m) => m.content).join(" | ");
   }
 
   it("src/components/** rule reaches the model for a component file and not for server code", async () => {
@@ -96,7 +96,7 @@ describe("compaction", () => {
     expect(rt.summaries.length).toBe(compactions.length);
     // EVERY request, before and after compaction, carried the rules and the plan
     for (const r of gw.requests) {
-      const sys = r.messages[0]!.content;
+      const sys = r.messages.filter((m) => m.role === "system").map((m) => m.content).join(" | ");
       expect(sys).toContain("REACT-RULE");
       expect(sys).toContain("ROOT-RULE");
       expect(sys).toContain("PLAN: step 1 add csv");

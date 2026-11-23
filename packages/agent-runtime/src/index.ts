@@ -230,7 +230,7 @@ ${summary}` });
         provider: deps.provider,
         model: deps.model,
         // Secrets never leave the machine, whatever their source: redact everything sent to the model.
-        messages: ([{ role: "system", content: ctx.system }, ...ctx.history] as Message[]).map((m) => ({ ...m, content: redactSecrets(m.content) })),
+        messages: ([...ctx.systemParts.map((content) => ({ role: "system", content })), ...ctx.history] as Message[]).map((m) => ({ ...m, content: redactSecrets(m.content) })),
         tools: specs,
         signal: this.signal,
       })) {

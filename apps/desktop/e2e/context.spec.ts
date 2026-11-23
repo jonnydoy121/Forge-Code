@@ -61,7 +61,8 @@ async function configure(page: Page, port: number, extra: { budget?: number } = 
 async function openTreeFile(page: Page, ...path: string[]) {
   for (const seg of path) await page.getByTestId(`tree-${seg}`).click();
 }
-const sys = (r: Req) => r.messages[0]!.content;
+/** All the system text of a request (it is sent as several system messages: the stable part, then the changing sections). */
+const sys = (r: Req) => r.messages.filter((m) => m.role === "system").map((m) => m.content).join(" | ");
 const send = async (page: Page, text: string) => {
   await page.getByTestId("agent-input").fill(text);
   await page.getByTestId("agent-input").press("Enter");

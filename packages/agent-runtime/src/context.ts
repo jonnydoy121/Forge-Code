@@ -15,6 +15,11 @@ export interface MeterEntry { id: string; label: string; tokens: number; trimmed
 
 export interface AssembledContext {
   system: string;
+  /**
+   * The system text as separate messages: the stable part first (base prompt and mode instructions), then the sections that
+   * change between requests. Providers that cache prompt prefixes can keep the stable part cached when the rest changes.
+   */
+  systemParts: string[];
   history: Message[];
   meter: MeterEntry[];
   totalTokens: number;
@@ -70,10 +75,14 @@ ${s.text}`);
   const convTokens = kept.reduce((n, m) => n + historyTokens(m), 0);
   meter.push({ id: "conversation", label: "Conversation", tokens: convTokens, trimmed: kept.length < opts.history.length });
 
-  const system = [opts.base, ...keptSections.map((s) => `## ${s.label}\n${s.text}`)].join("\n\n");
+  const block = (s: ContextSection) => `## ${s.label}\n${s.text}`;
+  const system = [opts.base, ...keptSections.map(block)].join("\n\n");
+  const stable = [opts.base, ...keptSections.filter((s) => s.id === "mode").map(block)].join("\n\n");
+  const rest = keptSections.filter((s) => s.id !== "mode").map(block).join("\n\n");
+  const systemParts = rest ? [stable, rest] : [stable];
   const total = estimateTokens(system) + convTokens;
   meter.unshift({ id: "system", label: "System prompt", tokens: estimateTokens(opts.base), trimmed: false });
-  return { system, history: kept, meter, totalTokens: total };
+  return { system, systemParts, history: kept, meter, totalTokens: total };
 }
 
 /**

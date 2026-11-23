@@ -62,9 +62,10 @@ describe("Anthropic adapter", () => {
     expect(events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("")).toBe("Hello");
     expect(events.find((e) => e.type === "tool_call")).toEqual({ type: "tool_call", call: { id: "tu_1", name: "read_file", args: { path: "a.ts" } } });
     const done = events.at(-1) as Extract<StreamEvent, { type: "done" }>;
-    expect(done.usage.costUsd).toBeCloseTo((1000 * 3 + 500 * 15) / 1e6);
+    expect(done.usage.costUsd).toBeCloseTo((1000 * 2 + 500 * 10) / 1e6); // Sonnet 5.5: $2 in, $10 out per million
+    expect(done.usage.inputTokens).toBe(1000);
     const body = JSON.parse(seen!.init.body as string);
-    expect(body.system).toBe("sys");
+    expect(body.system).toEqual([{ type: "text", text: "sys" }]);
     expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
     expect(body.tools[0].input_schema).toEqual({ type: "object" });
     expect((seen!.init.headers as Record<string, string>)["x-api-key"]).toBe("k");

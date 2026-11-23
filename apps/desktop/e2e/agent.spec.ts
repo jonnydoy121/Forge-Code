@@ -52,7 +52,7 @@ test("ask mode answers using read tools; request carries only read tools; privac
     // ask mode is read-only: no write, execute or plan-writing tools are even offered
     for (const t of ["edit_file", "write_file", "delete_file", "run_checks", "write_plan"]) expect(toolNames).not.toContain(t);
     // The ranked repo map was attached to the system prompt as context.
-    expect(requests[0]!.body.messages[0].content).toContain("Repo map");
+    expect((requests[0]!.body.messages as { role: string; content: string }[]).filter((m) => m.role === "system").map((m) => m.content).join(" | ")).toContain("Repo map");
     expect(requests[1]!.body.messages.at(-1).role).toBe("tool");
 
     // Audit log records the local model request and the tool call.
