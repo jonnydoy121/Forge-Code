@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+### UI: readable replies, fitting review controls
+- Assistant replies are formatted: code blocks (with a Copy button and language label), inline code, bold/italic, headings and lists. A streaming reply with an unfinished code fence renders as code immediately. Text is built from React elements only, so HTML in a reply is shown as text and never runs (tested in the real window, including an `<img onerror>` payload); links show their address on hover and never navigate the app.
+- The review pane's per-hunk buttons wrap instead of being clipped in narrow panes. `screens.spec.ts` captures the main screens for design review (`FORGE_SCREENS=<dir>`).
+
 ### First index twice as fast
 - Indexing a 120,000-file repo for the first time: 6.3 s -> 2.9 s (-54%), same result. The change-detection pass (read and hash every file) is skipped when nothing is indexed yet, and SQLite writes now run on their own thread, overlapped with parsing, with serialisation done on the parallel workers. Test: a first index equals the same files built incrementally (counts, Merkle root, symbols, exclusions, round trip through disk). Rejected after measuring: a larger WAL checkpoint interval.
 

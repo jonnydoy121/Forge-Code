@@ -70,10 +70,10 @@ function HunkView({ file, hunk, base, mode, selected, onSelect, onDecide, onEdit
 
   return (
     <div className={`mb-3 rounded border ${selected ? "border-blue-400" : "border-[var(--border)]"}`} data-testid="hunk" data-hunk-id={hunk.id} onClick={onSelect}>
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-2 py-1 text-xs">
-        <span className="text-[var(--muted)]">line {hunk.oldStart + 1}</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--border)] px-2 py-1 text-xs">
+        <span className="whitespace-nowrap text-[var(--muted)]">line {hunk.oldStart + 1}</span>
         {decided && <span className={decided === "accepted" ? "text-green-400" : "text-red-400"}>{decided}</span>}
-        <span className="ml-auto flex gap-1">
+        <span className="ml-auto flex flex-wrap gap-1 [&>button]:whitespace-nowrap">
           <button className="rounded bg-green-700/60 px-2" data-testid="accept-hunk" onClick={() => onDecide("accepted")}>Accept</button>
           <button className="rounded bg-red-700/60 px-2" data-testid="reject-hunk" onClick={() => onDecide("rejected")}>Reject</button>
           <button className="rounded bg-[var(--hover)] px-2" onClick={() => setEditing(hunk.newLines.join("\n"))}>Edit</button>
