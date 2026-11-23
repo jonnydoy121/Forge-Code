@@ -38,6 +38,17 @@ html, body, #root { height: 100%; margin: 0; }
 * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 body { font-family: system-ui, sans-serif; }
 
+/* Syntax colours in chat code blocks: the editor's own dark and light palettes. */
+:root { --tok-keyword: #569cd6; --tok-string: #ce9178; --tok-comment: #6a9955; --tok-number: #b5cea8; --tok-type: #4ec9b0; --tok-tag: #569cd6; --tok-attr: #9cdcfe; }
+.light { --tok-keyword: #0000ff; --tok-string: #a31515; --tok-comment: #008000; --tok-number: #098658; --tok-type: #267f99; --tok-tag: #800000; --tok-attr: #e50000; }
+.tok-keyword { color: var(--tok-keyword); }
+.tok-string { color: var(--tok-string); }
+.tok-comment { color: var(--tok-comment); font-style: italic; }
+.tok-number { color: var(--tok-number); }
+.tok-type { color: var(--tok-type); }
+.tok-tag { color: var(--tok-tag); }
+.tok-attr { color: var(--tok-attr); }
+
 /* Pending agent changes layered on the editor */
 .pending-removed { background: rgba(248, 81, 73, 0.22); }
 .pending-changed { background: rgba(210, 153, 34, 0.22); }

@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { highlight, type Segment } from "../lib/highlight";
 import { parseBlocks, type Block, type Inline } from "../lib/markdown";
 
 function inline(nodes: Inline[]): ReactNode[] {
@@ -29,6 +30,17 @@ function inline(nodes: Inline[]): ReactNode[] {
 
 function CodeBlock({ lang, text, closed }: { lang: string; text: string; closed: boolean }) {
   const [copied, setCopied] = useState(false);
+  const [lines, setLines] = useState<Segment[][] | null>(null);
+  // Colour a block once it is complete (a block still streaming in would be re-coloured on every word). Until then, or if the language
+  // is unknown, it is plain text.
+  useEffect(() => {
+    let live = true;
+    setLines(null);
+    if (closed) void highlight(text, lang).then((l) => live && setLines(l));
+    return () => {
+      live = false;
+    };
+  }, [text, lang, closed]);
   const copy = () => {
     void navigator.clipboard?.writeText(text).then(() => {
       setCopied(true);
@@ -46,7 +58,16 @@ function CodeBlock({ lang, text, closed }: { lang: string; text: string; closed:
         )}
       </div>
       <pre className="overflow-auto p-2 font-mono text-xs leading-relaxed">
-        <code>{text}</code>
+        <code data-highlighted={lines ? "true" : undefined}>
+          {lines
+            ? lines.map((segs, i) => (
+                <span key={i}>
+                  {segs.map((s, k) => (s.cls === "plain" ? s.text : <span key={k} className={`tok-${s.cls}`}>{s.text}</span>))}
+                  {i < lines.length - 1 ? "\n" : ""}
+                </span>
+              ))
+            : text}
+        </code>
       </pre>
     </div>
   );
