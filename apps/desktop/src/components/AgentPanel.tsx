@@ -11,6 +11,7 @@ import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
 import { mark } from "../lib/trace";
+import { Markdown } from "./Markdown";
 import { prewarmRuntime } from "../lib/runtimeProcess";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
 import { completeOnce } from "../lib/agentSession";
@@ -560,8 +561,8 @@ ${diff}`);
                 <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap">{it.output}</pre>
               </details>
             ) : (
-              <div key={i} data-testid={it.kind} className={it.kind === "user" ? "rounded bg-[var(--hover)] p-2" : it.kind === "notice" ? "text-amber-400" : "whitespace-pre-wrap"}>
-                {it.text}
+              <div key={i} data-testid={it.kind} className={it.kind === "user" ? "rounded bg-[var(--hover)] p-2 whitespace-pre-wrap" : it.kind === "notice" ? "text-amber-400 whitespace-pre-wrap" : ""}>
+                {it.kind === "assistant" ? <Markdown text={it.text} /> : it.text}
               </div>
             ),
           )}
