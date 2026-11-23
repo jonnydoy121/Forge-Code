@@ -1,7 +1,7 @@
 import type { VerificationReport } from "@forge/verify";
 import { formatError } from "@forge/verify";
 
-const KIND_LABEL: Record<string, string> = { format: "Format", lint: "Lint", typecheck: "Types", diagnostics: "Editor diagnostics", test: "Tests" };
+const KIND_LABEL: Record<string, string> = { format: "Format", lint: "Lint", typecheck: "Types", diagnostics: "Language server", test: "Tests" };
 
 /** Verification report card: checks run, pass/fail per check, tests added/changed, and what was not verified. */
 export function ReportCard({ report, source }: { report: VerificationReport; source?: string }) {

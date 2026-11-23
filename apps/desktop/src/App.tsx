@@ -24,6 +24,7 @@ import type { ReviewMode } from "@forge/review";
 import { createThreadWorktree, mergeThread, removeThread, threadSummary } from "./lib/worktree";
 import { createWorkspaceServices, diskFs, git, norm, type ReportEvent, type WorkspaceServices } from "./lib/workspace";
 import { languageForPath } from "./lib/uri";
+import { collectErrors } from "./lib/verifyDiagnostics";
 import { loadSettings, onSettingsChange } from "./lib/settings";
 import { loadApiKey } from "./lib/secrets";
 import { completeOnce, completeShort } from "./lib/agentSession";
@@ -162,6 +163,7 @@ export function App() {
 
   /** Workspace services for the main checkout, or (with extra) for an isolated thread rooted at its worktree. */
   function makeServices(dir: string, extra?: { stateDir?: string; mode?: () => ReviewMode }) {
+    const checkFile = extra?.stateDir ? undefined : (rel: string, text: string) => lsp.current.check(`${dir}/${rel}`, languageForPath(rel), text);
     return createWorkspaceServices({
       root: dir,
       stateDir: extra?.stateDir,
@@ -170,9 +172,10 @@ export function App() {
       onReport: (e) => setReport(e),
       onHook: (event, output) => setNotice(`${event} hook: ${output.slice(0, 300)}`),
       ask: (req) => new Promise<Remember>((resolve) => setPermissions((q) => [...q, { req, resolve }])),
-      diagnostics: async (files) => errorMarkers(dir, files),
       // Only the main checkout has a language server; an isolated thread (its own worktree) has none to ask.
-      checkFile: extra?.stateDir ? undefined : (rel, text) => lsp.current.check(`${dir}/${rel}`, languageForPath(rel), text),
+      checkFile,
+      // Errors for the files a run touched: the editor's markers where it has the file open, the language server for the rest.
+      diagnostics: (files) => collectErrors({ files, open: (rel) => (getDoc(`${dir}/${rel}`) ? errorMarkers(dir, [rel]) : null), read: (rel) => diskFs.read(`${dir}/${rel}`), check: checkFile }),
       askQuestions: (questions) => new Promise<string[]>((resolve) => setQuestionReq({ questions, resolve })),
       askAddFile: (question, path) => new Promise<boolean>((resolve) => setAddFileReq({ question, path, resolve })),
       onPlanWritten: (slug) => {

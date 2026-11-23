@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Verification checks files the editor never opened
+- The verification report's diagnostics check only knew about files open in the editor, so an error in a file the agent created or edited and you never opened was missed: the report could say **Verified** over a type error (shown by disabling the new path: the same run reported "Verified"). It now uses the editor's markers for open files and asks the language server about the others (the on-disk text of each touched file, up to 20, in parallel). Files it could not check (no server for that type, a slow server, a deleted file) are skipped rather than claimed either way. The check is labelled "Language server" in the report.
+- Tests: `collectErrors` units (5), and `verify-unopened.spec.ts` in the real window (the agent writes a broken file nobody opens; the report must say "Checks failed" with `src/broken.ts:1:14` and the TypeScript message; 3 of 3 runs, red without the change).
+- Known limit: a file the server could not check does not show up in the report at all, so "Verified" still means "no errors found where it could look".
+
 ### Agent tool: diagnostics
 - New `diagnostics` tool: the agent can ask the language server (TypeScript/JavaScript and Python) about one file in about a second, without running the project's checks. It checks the file **as the agent sees it, including its own unaccepted edits**, so it can verify an edit before the developer has accepted it. Errors come first with 1-based line:col, code and message; long lists are capped. Read-class (Ask and Plan mode have it), refuses secret files and path escapes, and says plainly when no server covers the file or the server did not answer (it does not replace `run_checks`).
 - How: the text is opened on the language server under a sibling shadow uri (`a.ts` -> `a.forge-check.ts`), so the editor's own document, version numbers and diagnostics are never touched, and the editor never sees the probe's results. An editor document with exactly the checked text answers from its live diagnostics instead. Checks of one file run one at a time; the server is given 15 s, and answers are taken once it has gone quiet, so a second round of diagnostics is not missed. Not offered in isolated threads (their worktree has no language server).
