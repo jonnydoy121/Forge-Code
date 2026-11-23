@@ -13,6 +13,7 @@ import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
 import { checkEndpoint, type EndpointCheck } from "../lib/endpoint";
 import { toolSummary } from "../lib/toolSummary";
 import { startersFor } from "../lib/starters";
+import { SettingsFrame } from "./SettingsFrame";
 import { pickFetch } from "../lib/http";
 import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
@@ -626,7 +627,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
       </header>
 
       {showSettings && (
-        <div className="max-h-[60vh] space-y-1 overflow-y-auto overflow-x-hidden border-b border-[var(--border)] p-3 text-xs" data-testid="settings">
+        <SettingsFrame onClose={() => setShowSettings(false)}>
+        <div className="space-y-1 text-sm" data-testid="settings">
           <SettingsHeading first>Model</SettingsHeading>
           <Row label="Provider">
             <select className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.provider} onChange={(e) => update({ provider: e.target.value as AgentSettings["provider"], model: DEFAULT_MODELS[e.target.value as AgentSettings["provider"]] })}>
@@ -761,6 +763,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             <textarea data-testid="user-rules" className="mt-1 h-16 w-full rounded bg-[var(--hover)] p-1" value={settings.userRules} onChange={(e) => update({ userRules: e.target.value })} />
           </label>
         </div>
+        </SettingsFrame>
       )}
 
       {pendingCount > 0 && (

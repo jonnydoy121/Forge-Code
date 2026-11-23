@@ -409,7 +409,8 @@ export function App() {
           )}
         </aside>
         <Splitter label="Explorer width" width={explorerW} min={EXPLORER.min} max={explorerMax} grow={1} onChange={(w) => setLayout((l) => ({ ...l, explorer: w }))} onReset={() => setLayout((l) => ({ ...l, explorer: EXPLORER.def }))} testId="splitter-explorer" />
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="relative flex min-w-0 flex-1 flex-col">
+          <div id="settings-host" className="empty:hidden" />
           <TabBar state={tabs} onActivate={(p) => dispatch({ type: "activate", path: p })} onClose={(p) => void closeTab(p)} />
           {notice && <div className="bg-red-900/40 px-3 py-1 text-sm" role="alert">{notice}</div>}
           {inline && (
