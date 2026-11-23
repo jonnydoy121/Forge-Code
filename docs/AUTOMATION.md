@@ -15,3 +15,6 @@ See `examples/github-actions.yml`. GitLab or any pipeline: build the CLI the sam
 
 ## Status
 Verified by tests: cron parsing/DST, job runner with a scripted model, the bundled CLI as a process against a mock server. **Not verified:** a real GitHub Actions run, real hosted models.
+
+## Serve
+`forge-code serve` (set `FORGE_SERVE_TOKEN`, 16+ chars) exposes read-only `POST /ask {"prompt": "..."}` with a bearer token on 127.0.0.1. It is the base a chat bridge would call; no Slack/Telegram/Linear adapter exists yet.

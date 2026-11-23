@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Agent features list: rules, specialists, schedules, presets, serve
+- **`.forgerules`** is read as a rules file (app and CLI); the CLI now loads rules too, and tolerates missing rule folders.
+- **Specialist agents** (`.forge/agents/*.md`, read-only tools, own model tier) used through `delegate`; Agents tab in the Context pane.
+- **`forge-code schedule`** (list / run-due [--at, --window] / run / watch) from `.forge/schedule.json`; results saved under `.forge/schedule/runs/`. Cron parser is clock-change safe (a first version looped forever when an hour repeated; found by a test, fixed).
+- **CLI provider presets**: gemini, openrouter, groq, lmstudio, each with its own key variable. Never run against the real services.
+- **`forge-code serve`**: read-only bearer-token HTTP `POST /ask`. Slack/Telegram/Linear/Discord adapters are NOT built.
+- New docs: CAPABILITIES.md (claim-by-claim status), AUTOMATION.md, EXTENDING.md, example GitHub Actions workflow (never run on a real runner).
 ### Fixes from a second review (the Rust indexer and the desktop lib)
 - **A failed database write left the index claiming files it had not stored.** Since index writes were pipelined, the in-memory index was updated while the writer was still storing batches, so a write error (disk full, a locked database) left memory ahead of the database until a restart. Before the pipelining, a failed write stopped before touching memory. Memory is now reset on a write failure, so it never claims more than the database has. A test breaks the database underneath the index to force the failure (memory held 10 files after the failed write before the fix, 0 after).
 - **The agent's `diagnostics` check could answer for older text.** Right after the editor's text changed, and before the language server had published again, the cached diagnostics described the previous text, so a file the agent had just broken could be reported as having no problems. A changed file is now marked dirty and checked fresh until the server answers; the cache is also cleared when the workspace changes. Three tests.

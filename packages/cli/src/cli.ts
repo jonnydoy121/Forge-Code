@@ -43,6 +43,7 @@ Usage:
   forge-code ask "question about this repo"        read-only, never edits
   forge-code run "task to carry out"               proposes edits and prints them as diffs (writes nothing)
   forge-code run "task" --apply                    ...and writes the changes to disk
+  forge-code serve --port 8787                     read-only HTTP endpoint for bots and webhooks (POST /ask, bearer token)
   forge-code schedule list|run-due|run|watch       run the agent on a schedule from .forge/schedule.json (forge-code schedule --help)
 
 Options:
