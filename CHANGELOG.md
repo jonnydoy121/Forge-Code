@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Strata
+- **Strata (local)** is a provider preset in the CLI (`--provider strata`, key from `STRATA_API_KEY`) and an Endpoint choice in Settings: `http://127.0.0.1:47831/v1`, model `swift-iq2_xs`. Checked against the running Strata: the CLI reaches it and gets Strata's own `401 Invalid API key` without a key. **A completed answer through Strata is not verified** (it needs your Strata API key). Tests confirm the Strata key goes only to Strata and an OpenAI key is never sent to it.
+
 ### Skills applied automatically (researched and measured)
 - A request that clearly matches a skill (two or more distinct words in its name and description, rarity-weighted, at most two skills) now gets that skill's instructions up front, in the CLI and the app, instead of relying on the model to call `use_skill`. `--no-auto-skills` and a Settings checkbox turn it off.
 - Measured on a local 7B model (60 runs per condition): conventions followed 0 of 60 with no skills, 3 to 5 of 60 with the skills only listed, 31 to 32 of 60 applied automatically; nothing applied on unrelated requests. Offline matching: 95% precision, 91% recall on 36 labelled requests written by the author. One model, artificial conventions, string-match scoring: see `docs/AUTO-SKILLS.md` for the limits.

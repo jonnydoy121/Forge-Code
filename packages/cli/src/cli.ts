@@ -51,7 +51,7 @@ Usage:
 Options:
   --model <name>        model to use (or FORGE_MODEL)
   --no-auto-skills      do not apply matching skills automatically (they stay available through use_skill)
-  --provider <kind>     ollama (default), openai, anthropic, or a preset: gemini, openrouter, groq, lmstudio (or FORGE_PROVIDER)
+  --provider <kind>     ollama (default), openai, anthropic, or a preset: gemini, openrouter, groq, lmstudio, strata (or FORGE_PROVIDER)
   --base-url <url>      API base URL (or FORGE_BASE_URL)
   --allow <command>     let the agent run this command (repeatable; a trailing * allows any arguments but never
                         chained or redirected commands). Nothing runs unless allowed, e.g. --allow "npm test"
@@ -71,6 +71,7 @@ export const PRESETS: Record<string, { baseUrl: string; keyEnv?: string }> = {
   openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
   groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
   lmstudio: { baseUrl: "http://localhost:1234/v1" },
+  strata: { baseUrl: "http://127.0.0.1:47831/v1", keyEnv: "STRATA_API_KEY" },
 };
 const KIND_LIST = [...KINDS, ...Object.keys(PRESETS)].join(", ");
 

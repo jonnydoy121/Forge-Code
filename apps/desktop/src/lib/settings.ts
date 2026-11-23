@@ -72,6 +72,7 @@ export const ENDPOINT_PRESETS = [
   { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
   { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
   { id: "lmstudio", label: "LM Studio (local)", baseUrl: "http://localhost:1234/v1", model: "local-model" },
+  { id: "strata", label: "Strata (local)", baseUrl: "http://127.0.0.1:47831/v1", model: "swift-iq2_xs" },
 ] as const;
 
 /** Which preset a base URL belongs to ("custom" for anything else), so the picker reflects what is saved. */

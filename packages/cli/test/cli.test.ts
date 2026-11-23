@@ -36,7 +36,7 @@ describe("arguments", () => {
     expect(parseArgs(["run"], {})).toEqual({ error: '"run" needs a prompt' });
     expect(parseArgs(["ask", "x", "--apply"], {})).toEqual({ error: "--apply only makes sense with run" });
     expect(parseArgs(["run", "x", "--max-cost", "-1"], {})).toEqual({ error: "--max-cost must be a positive number of dollars" });
-    expect(parseArgs(["run", "x", "--provider", "bogus"], {})).toEqual({ error: "--provider must be one of ollama, openai, anthropic, gemini, openrouter, groq, lmstudio" });
+    expect(parseArgs(["run", "x", "--provider", "bogus"], {})).toEqual({ error: "--provider must be one of ollama, openai, anthropic, gemini, openrouter, groq, lmstudio, strata" });
     expect(parseArgs(["--help"], {})).toEqual({ help: true });
   });
 });
@@ -297,5 +297,35 @@ describe("automatic skills in the CLI", () => {
     expect(systemText(off)).not.toContain("Refs: FRG-");
     expect(systemText(off)).toContain("git-commit-style"); // still listed so the model can load it
     expect(t.err()).not.toContain("applying skill");
+  });
+});
+
+describe("Strata preset", () => {
+  it("points at the local Strata server and takes its key only from STRATA_API_KEY", () => {
+    expect(parseArgs(["ask", "hi", "--provider", "strata"], {})).toMatchObject({ provider: "openai", preset: "strata", baseUrl: "http://127.0.0.1:47831/v1" });
+  });
+
+  it("sends the Strata key to Strata, and never an OpenAI key", async () => {
+    const seen: (string | undefined)[] = [];
+    const fetched: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      fetched.push(String(url));
+      seen.push((init?.headers as Record<string, string> | undefined)?.authorization);
+      return new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\ndata: [DONE]\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
+    }) as typeof fetch;
+    try {
+      const dir = project();
+      const withStrata = io(dir, undefined, { STRATA_API_KEY: "strata-key", OPENAI_API_KEY: "sk-openai-secret" });
+      expect(await runCli(["ask", "hi", "--provider", "strata", "--model", "swift-iq2_xs"], withStrata.i)).toBe(0);
+      expect(fetched[0]).toBe("http://127.0.0.1:47831/v1/chat/completions");
+      expect(seen[0]).toBe("Bearer strata-key");
+      seen.length = 0;
+      const withoutKey = io(dir, undefined, { OPENAI_API_KEY: "sk-openai-secret" });
+      await runCli(["ask", "hi", "--provider", "strata", "--model", "swift-iq2_xs"], withoutKey.i);
+      expect(seen.every((h) => !h || !h.includes("sk-openai-secret"))).toBe(true); // the OpenAI key was not sent to Strata
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
