@@ -1,0 +1,29 @@
+# Forge-Code in GitHub Actions: a nightly review that proposes changes and uploads the result.
+# Copy to .github/workflows/forge-code.yml. Not exercised against a live runner or a live model by this repo's CI.
+name: forge-code-nightly
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Build the forge-code CLI
+        run: |
+          git clone --depth 1 https://github.com/jonnydoy121/Forge-Code /tmp/forge
+          cd /tmp/forge && npm ci && npm run build:cli
+      - name: Run scheduled jobs from .forge/schedule.json
+        env:
+          FORGE_PROVIDER: openai
+          FORGE_BASE_URL: https://api.openai.com/v1
+          FORGE_MODEL: gpt-4o-mini
+          FORGE_API_KEY: ${{ secrets.FORGE_API_KEY }}
+        # GitHub's schedule can fire minutes late, so look back 15 minutes.
+        run: node /tmp/forge/target/cli/forge-code.cjs schedule run-due --window 15
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: forge-runs, path: .forge/schedule/runs/ }
