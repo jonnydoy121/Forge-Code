@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { CLAUDE_AGENT } from "../lib/claudePlan";
 import { latestOnly } from "../lib/latestOnly";
-import { RuleEngine, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
+import { RuleEngine, type AgentDef, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
 import type { WorkspaceServices } from "../lib/workspace";
 
 interface Props {
@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "rules" | "memory" | "skills" | "docs" | "connections";
+type Tab = "rules" | "memory" | "skills" | "agents" | "docs" | "connections";
 
 export function ContextPane({ services, version, activeFile, onOpenFile, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("rules");
@@ -22,9 +22,9 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
       <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-sm">
         <strong>Context</strong>
         <div className="flex gap-3" role="tablist" aria-label="Context sections">
-          {(["rules", "memory", "skills", "docs", "connections"] as Tab[]).map((t) => (
+          {(["rules", "memory", "skills", "agents", "docs", "connections"] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} data-testid={`ctx-tab-${t}`} className={tab === t ? "underline" : "text-[var(--muted)]"} onClick={() => setTab(t)}>
-              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "skills" ? "Skills" : t === "docs" ? "Docs" : "Connections"}
+              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "skills" ? "Skills" : t === "agents" ? "Agents" : t === "docs" ? "Docs" : "Connections"}
             </button>
           ))}
         </div>
@@ -34,6 +34,7 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
         {tab === "rules" && <RulesTab services={services} version={version} activeFile={activeFile} onOpenFile={onOpenFile} />}
         {tab === "memory" && <MemoryTab services={services} version={version} />}
         {tab === "skills" && <SkillsTab services={services} version={version} onOpenFile={onOpenFile} />}
+        {tab === "agents" && <AgentsTab services={services} version={version} />}
         {tab === "docs" && <DocsTab services={services} version={version} />}
         {tab === "connections" && <ConnectionsTab services={services} />}
       </div>
@@ -95,6 +96,44 @@ function RulesTab({ services, version, activeFile, onOpenFile }: Omit<Props, "on
       </div>
       {msg && <div role="status" data-testid="rules-msg">{msg}</div>}
       <div className="text-xs text-[var(--muted)]">{RuleEngine.name} reads AGENTS.md, CLAUDE.md, .cursorrules, .cursor/rules, .windsurfrules, .github/copilot-instructions.md, nested AGENTS.md and .forge/rules/*.md.</div>
+    </div>
+  );
+}
+
+function AgentsTab({ services, version }: { services: WorkspaceServices; version: number }) {
+  const [list, setList] = useState<AgentDef[] | null>(null);
+  useEffect(() => {
+    const load = latestOnly(setList);
+    load.runOr(services.agents(), () => setList([]));
+    return load.cancel;
+  }, [services, version]);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[var(--muted)]">
+        A specialist is a markdown file in <code>.forge/agents/&lt;name&gt;.md</code> in this repository or in your own <code>~/.forge/agents</code>: a <code>description:</code>, optionally <code>tools:</code> (which of the read-only tools it may use) and{" "}
+        <code>tier:</code> (scout, builder or architect), then its instructions. The agent hands it a task with <code>delegate</code> and gets back only a report. Specialists read and report; they cannot edit or run commands.
+      </p>
+      {list === null ? null : list.length === 0 ? (
+        <p data-testid="agents-empty">No specialists yet. Create <code>.forge/agents/reviewer.md</code> with a <code>description:</code> line and instructions.</p>
+      ) : (
+        <ul className="space-y-2" aria-label="Specialists">
+          {list.map((a) => (
+            <li key={`${a.source}:${a.name}`} className="rounded border border-[var(--border)] p-2" data-testid="agent-def" data-agent={a.name}>
+              <div className="flex items-center gap-2">
+                <strong>{a.name}</strong>
+                <span className="rounded bg-[var(--hover)] px-1 text-xs">{a.source === "project" ? "this repo" : "personal"}</span>
+                <span className="rounded bg-[var(--hover)] px-1 text-xs" data-testid="agent-tier">{a.tier ?? "builder"}</span>
+              </div>
+              <div>{a.description}</div>
+              <div className="text-xs text-[var(--muted)]" data-testid="agent-tools">Tools: {a.tools ? a.tools.join(", ") : "all read-only tools"}</div>
+              {a.problems.map((p) => (
+                <div key={p} className="text-xs text-amber-400" data-testid="agent-problem">{p}</div>
+              ))}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

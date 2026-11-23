@@ -22,7 +22,7 @@ import { AcpClient, forgeAcpHandlers, parseAcpConfig, type AcpAgentConfig, type 
 import type { LineTransport } from "@forge/rpc";
 import { listen } from "@tauri-apps/api/event";
 import { PlanGuard, PlanStore, createPlanTools, type Question } from "@forge/plans";
-import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts, loadPrompts, loadSkills, createSkillTools, type SavedPrompt, type Skill } from "@forge/context-store";
+import { DocsStore, MemoryStore, RuleEngine, SessionStore, collectFacts, createContextTools, generateAgentsMd, lintRules, type LintWarning, type ProjectFacts, loadPrompts, loadSkills, loadAgents, type AgentDef, createSkillTools, type SavedPrompt, type Skill } from "@forge/context-store";
 import { loadSettings } from "./settings";
 import { createDiagnosticsTool, type CheckResult } from "./diagnosticsTool";
 import { CLAUDE_AGENT } from "./claudePlan";
@@ -129,6 +129,8 @@ export interface WorkspaceServices {
   prompts(): Promise<SavedPrompt[]>;
   /** skills from .forge/skills/<name>/SKILL.md */
   skills(): Promise<Skill[]>;
+  /** Specialist agents from .forge/agents (and the user's own), for the coordinator's `delegate` tool. */
+  agents(): Promise<AgentDef[]>;
   /** use_skill, and run_skill_script (execute-class: gated, and sandboxed when sandboxing is on) */
   skillTools(settings: { sandbox: boolean; toolchainRead: boolean }): RegisteredTool[];
   docs: DocsStore;
@@ -498,6 +500,7 @@ export async function createWorkspaceServices(opts: {
     memories,
     prompts: () => loadPrompts(diskFs, `${root}/.forge/prompts`),
     skills: () => loadSkills(diskFs, `${root}/.forge/skills`, home ? `${norm(home)}/.forge/skills` : undefined),
+    agents: () => loadAgents(diskFs, `${root}/.forge/agents`, home ? `${norm(home)}/.forge/agents` : undefined),
     skillTools: (st) =>
       createSkillTools({
         root,

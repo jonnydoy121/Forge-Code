@@ -2,6 +2,7 @@ import { Gateway, parsePrices } from "@forge/model-gateway";
 import { Runtime, createSubAgentTool, type ContextSection } from "@forge/agent-runtime";
 import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
+import type { AgentDef } from "@forge/context-store";
 import { modePrompt } from "@forge/plans";
 import { RuntimeClient, type AgentRuntime } from "@forge/agent-runtime/src/remote";
 import { openRuntimePort, sidecarPath } from "./runtimeProcess";
@@ -77,16 +78,28 @@ export async function createSession(opts: {
 
   const readTools = [...READ_TOOLS, ...(opts.isolated ? [] : [...createIndexTools(indexBackend), ...services.diagnosticsTools]), ...services.contextTools.filter((t) => t.spec.class === "read" && t.spec.name !== "remember")];
   // Sub-agents: fresh context, read-only tools, no `delegate` (no recursion). Only their report comes back.
-  const makeSub = () =>
-    new Runtime({
+  const agents = await services.agents().catch(() => []);
+  const sub = (def?: AgentDef) => {
+    // A specialist has its own instructions, its own narrower set of the read-only tools, and its own model tier. Never write tools.
+    const allowed = def?.tools ? readTools.filter((t) => def.tools!.includes(t.spec.name)) : readTools;
+    if (def && allowed.length === 0) throw new Error(`specialist "${def.name}" lists tools that do not exist or are not read-only: ${def.tools!.join(", ")}`);
+    const tier = def?.tier && def.tier !== "builder" && !routing?.disabled?.includes(def.tier) ? routing?.[def.tier] : undefined;
+    return new Runtime({
       gateway,
-      tools: createToolHost({ root: services.root, fs: services.overlay(tauriFs), tools: readTools }),
-      provider: "default",
-      model: settings.model,
+      tools: createToolHost({ root: services.root, fs: services.overlay(tauriFs), tools: allowed }),
+      provider: tier?.provider ?? "default",
+      model: tier?.model ?? settings.model,
       limits: { maxSteps: 10, maxCostUsd: settings.maxCostUsd, maxSeconds: settings.maxSeconds },
       budgetTokens: settings.budgetTokens,
-      audit: audit("tool", "sub-agent "),
+      sections: def ? () => [{ id: "specialist", label: `You are the "${def.name}" specialist`, priority: 0, text: def.instructions }] : undefined,
+      audit: audit("tool", def ? `specialist ${def.name} ` : "sub-agent "),
     });
+  };
+  const makeSub = (name?: string) => {
+    const def = name ? agents.find((a) => a.name === name) : undefined;
+    if (name && !def) throw new Error(`no specialist named "${name}"`);
+    return sub(def);
+  };
   const tools = createToolHost({
     root: services.root,
     fs: services.overlay(tauriFs),
@@ -99,7 +112,7 @@ export async function createSession(opts: {
       ...services.skillTools({ sandbox: settings.sandbox, toolchainRead: settings.toolchainRead }),
       ...services.mcp.tools(),
       ...services.contextTools.filter((t) => t.spec.name === "remember"),
-      createSubAgentTool({ make: makeSub, onCost: (usd) => runtime.addCost(usd) }),
+      createSubAgentTool({ make: makeSub, specialists: agents.map((a) => ({ name: a.name, description: a.description })), onCost: (usd) => runtime.addCost(usd) }),
     ],
   });
   const limits = { maxSteps: settings.maxSteps, maxCostUsd: settings.maxCostUsd, maxSeconds: settings.maxSeconds };
