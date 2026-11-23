@@ -3,6 +3,7 @@
 ## Unreleased
 ### Monaco trimmed to what the app uses
 - `src/lib/monaco-features.ts` imports only the editor features Forge-Code uses (no go-to-definition, rename, code actions, signature help, colour picker, formatting, semantic tokens, inlay hints, code lens, and no TypeScript/HTML/CSS language services, whose workers were never provided): the engine chunk 3,334 -> 3,135 KB (-6%), everything shipped 5,126 -> 4,827 KB. No measurable memory change; the benefit is about 200 KB less to download and parse. Verified by end-to-end tests for syntax colouring across seven file types (plain text stays uncoloured), find, and the F1 palette with our AI action, plus the existing suites. Tied to the pinned Monaco 0.52.2 (a missing path fails the build).
+- A guard test (`monaco-features.test.ts`) checks every listed module exists in the installed Monaco, that the version is the pinned 0.52.2, that the features the app depends on stay in the list and the unused language services stay out. An upgrade now fails there with the exact missing paths. It was verified to fail when a path is broken.
 - Final startup, real release build, baseline vs now: DOM ready 196 -> 34 ms, first paint 228 -> 128 ms, shell mounted 324 -> 134 ms, startup JavaScript 3,971 -> 357 KB; memory 385 -> 378 MB.
 
 ### One agent process for every thread
