@@ -2,7 +2,7 @@
 
 ## Unreleased
 ### Strata
-- **Strata (local)** is a provider preset in the CLI (`--provider strata`, key from `STRATA_API_KEY`) and an Endpoint choice in Settings: `http://127.0.0.1:47831/v1`, model `swift-iq2_xs`. Checked against the running Strata: the CLI reaches it and gets Strata's own `401 Invalid API key` without a key. **A completed answer through Strata is not verified** (it needs your Strata API key). Tests confirm the Strata key goes only to Strata and an OpenAI key is never sent to it.
+- **Strata (local)** is a provider preset in the CLI (`--provider strata`, key from `STRATA_API_KEY`) and an Endpoint choice in Settings: `http://127.0.0.1:47831/v1`, model `swift-iq2_xs`. Checked against the running local Strata with its API key: `ask` returned an answer, and `run` completed a small edit with real tool calls (find, read, edit) and produced the correct diff (one model, `swift-iq2_xs`, one small task; the desktop app was not exercised against Strata). Without a key it returns Strata's own `401`. Tests confirm the Strata key goes only to Strata and an OpenAI key is never sent to it.
 
 ### Skills applied automatically (researched and measured)
 - A request that clearly matches a skill (two or more distinct words in its name and description, rarity-weighted, at most two skills) now gets that skill's instructions up front, in the CLI and the app, instead of relying on the model to call `use_skill`. `--no-auto-skills` and a Settings checkbox turn it off.
