@@ -1,6 +1,6 @@
 // The bundled `forge-code` executable run as a real process against a local mock model server (no network, no key).
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -68,6 +68,33 @@ describe("forge-code as a process", () => {
     const r = await forge(["run", "bump a", "--apply", "--provider", "openai", "--base-url", baseUrl, "--model", "m"], dir);
     expect(r.code, r.err).toBe(0);
     expect(readFileSync(join(dir, "a.js"), "utf8")).toBe("export const a = 100;\n");
+  }, 40_000);
+
+  it("runs scheduled jobs: list shows them, run-due runs the one that is due and records the result, and a job that edits only proposes", async () => {
+    const dir = project();
+    mkdirSync(join(dir, ".forge"), { recursive: true });
+    writeFileSync(join(dir, ".forge", "schedule.json"), JSON.stringify({ jobs: [{ name: "bump", cron: "0 2 * * *", command: "run", prompt: "bump a" }, { name: "noon", cron: "0 12 * * *", command: "ask", prompt: "noon" }] }));
+    const listed = await forge(["schedule", "list"], dir);
+    expect(listed.code, listed.err).toBe(0);
+    expect(listed.out).toContain("bump");
+    expect(listed.out).toContain("noon");
+
+    // The model settings come from the environment for a scheduled job, as for any other run.
+    const viaEnv = await new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
+      const child = spawn(process.execPath, [bundle, "schedule", "run-due", "--at", "2026-03-04T02:00:00"], { cwd: dir, env: { ...process.env, FORGE_API_KEY: "test-key", FORGE_PROVIDER: "openai", FORGE_BASE_URL: baseUrl, FORGE_MODEL: "m" } });
+      let out = "";
+      let err = "";
+      child.stdout.on("data", (d) => (out += d));
+      child.stderr.on("data", (d) => (err += d));
+      const timer = setTimeout(() => child.kill(), 30_000);
+      child.on("close", (code) => (clearTimeout(timer), resolve({ code, out, err })));
+    });
+    expect(viaEnv.code, viaEnv.err).toBe(0);
+    expect(viaEnv.out).toContain("bump: done, 1 file proposed");
+    expect(readFileSync(join(dir, "a.js"), "utf8")).toBe("export const a = 1;\n"); // proposed, not written
+    const saved = JSON.parse(readFileSync(join(dir, ".forge", "schedule", "runs", "bump-20260304-0200.json"), "utf8"));
+    expect(saved).toMatchObject({ job: "bump", exitCode: 0 });
+    expect(saved.result.files[0].diff).toContain("+export const a = 100;");
   }, 40_000);
 
   it("prints help, and exits 1 with a message on bad usage", async () => {

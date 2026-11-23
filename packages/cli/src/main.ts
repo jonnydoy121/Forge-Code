@@ -1,7 +1,10 @@
 // Process entry point for `forge-code` (bundled by scripts/build-cli.mjs).
 import { runCli } from "./cli";
+import { runSchedule } from "./schedule";
 
-runCli(process.argv.slice(2), {
+const args = process.argv.slice(2);
+// `schedule` has its own sub-commands; everything else is ask or run.
+(args[0] === "schedule" ? runSchedule.bind(null, args.slice(1)) : runCli.bind(null, args))({
   out: (t) => void process.stdout.write(t),
   err: (t) => void process.stderr.write(t),
   env: process.env,

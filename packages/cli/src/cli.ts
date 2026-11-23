@@ -42,6 +42,7 @@ Usage:
   forge-code ask "question about this repo"        read-only, never edits
   forge-code run "task to carry out"               proposes edits and prints them as diffs (writes nothing)
   forge-code run "task" --apply                    ...and writes the changes to disk
+  forge-code schedule list|run-due|run|watch       run the agent on a schedule from .forge/schedule.json (forge-code schedule --help)
 
 Options:
   --model <name>        model to use (or FORGE_MODEL)
