@@ -41,7 +41,7 @@ describe("RuntimeClient over a worker-style port", () => {
     expect(c.running).toBe(false);
     expect(c.meter().calibrated).toBe(true);
     // the model saw exactly the tools the host exposes for this mode
-    expect(gw.requests[0]!.tools!.map((t) => t.name)).toEqual(["read_file", "ls", "grep"]);
+    expect(gw.requests[0]!.tools!.map((t) => t.name)).toEqual(["read_file", "ls", "grep", "find_files"]);
   });
 
   it("mode enforcement still comes from the host: write tools are never offered in ask mode", async () => {

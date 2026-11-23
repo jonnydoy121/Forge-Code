@@ -214,6 +214,7 @@ fn main() {
             indexer::index_start,
             indexer::index_status,
             indexer::index_grep,
+            indexer::index_find_files,
             indexer::index_symbol,
             indexer::index_references,
             indexer::index_repo_map,

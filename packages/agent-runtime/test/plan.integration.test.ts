@@ -96,7 +96,7 @@ describe("Plan mode", () => {
     const events = await drain(t.runtime.run({ mode: "plan", prompt: "Add a greeting feature" }));
 
     // tool exposure: read + plan tools only
-    expect(t.gateway.requests[0]!.tools!.map((x) => x.name).sort()).toEqual(["ask_user", "grep", "ls", "read_file", "write_plan"]);
+    expect(t.gateway.requests[0]!.tools!.map((x) => x.name).sort()).toEqual(["ask_user", "find_files", "grep", "ls", "read_file", "write_plan"]);
     expect(t.gateway.requests[0]!.messages[0]!.content).toContain("PLAN mode");
     expect(t.gateway.requests[0]!.messages[0]!.content).toContain("## Tasks");
 

@@ -11,6 +11,8 @@ export interface Cone { imports: string[]; imported_by: string[]; transitive_ups
 /** Transport to the indexer (Tauri IPC in the app, a fake in tests). Paths are workspace-relative. */
 export interface IndexBackend {
   grep(pattern: string, glob?: string, max?: number): Promise<GrepHit[]>;
+  /** Files whose path matches (glob if it has glob characters, else a case-insensitive substring). Optional: older backends lack it. */
+  findFiles?(pattern: string, max?: number): Promise<string[]>;
   symbol(name: string): Promise<SymbolHit[]>;
   references(symbol: string): Promise<RefHit[]>;
   repoMap(focusFiles: string[], tokenBudget: number): Promise<string>;
@@ -61,10 +63,25 @@ export function createIndexTools(b: IndexBackend): RegisteredTool[] {
       const hits = await b.semantic(s(a.query, "query"), n(a.k, 8));
       return hits.length ? hits.map((h) => `${h.file}:${h.start}-${h.end} (score ${h.score.toFixed(2)})\n${h.text}`).join("\n---\n") : "no results (index may still be building)";
     }),
-    tool("grep", "Exact regular-expression search across the workspace (ripgrep-style, honours .gitignore). Optional glob like src/**/*.ts.", { pattern: { type: "string" }, glob: { type: "string" } }, ["pattern"], async (a) => {
-      const hits = await b.grep(s(a.pattern, "pattern"), typeof a.glob === "string" && a.glob ? a.glob : undefined, 200);
+    tool("grep", "Exact regular-expression search across the workspace (ripgrep-style, honours .gitignore). Optional glob like src/**/*.ts or *.py. Set ignore_case for a case-insensitive search and files_only to list just the matching file paths.", { pattern: { type: "string" }, glob: { type: "string" }, ignore_case: { type: "boolean" }, files_only: { type: "boolean" } }, ["pattern"], async (a) => {
+      const pattern = (a.ignore_case === true ? "(?i)" : "") + s(a.pattern, "pattern");
+      const glob = typeof a.glob === "string" && a.glob ? a.glob : undefined;
+      if (a.files_only === true) {
+        // Ask for plenty of hits, then list each file once: the first 200 hits could all be in a few files.
+        const files = [...new Set((await b.grep(pattern, glob, 5000)).map((h) => h.file))].sort();
+        return files.length ? files.slice(0, 200).join("\n") + (files.length > 200 ? `\n[${files.length - 200} more files]` : "") : "no matches";
+      }
+      const hits = await b.grep(pattern, glob, 200);
       return hits.length ? hits.map((h) => `${h.file}:${h.line}:${h.text}`).join("\n") : "no matches";
     }),
+    ...(b.findFiles
+      ? [
+          tool("find_files", "Find files by name. A pattern with * ? or {a,b} is a glob (*.test.ts matches anywhere, src/**/*.ts is anchored); anything else is a case-insensitive part of the path (auth finds src/auth/login.ts). Returns sorted workspace paths.", { pattern: { type: "string" } }, ["pattern"], async (a) => {
+            const files = await b.findFiles!(s(a.pattern, "pattern"), 200);
+            return files.length ? files.join("\n") : "no files found";
+          }),
+        ]
+      : []),
     tool("symbol", "Precise lookup of a symbol's definition(s): location, signature and docstring.", { name: { type: "string" } }, ["name"], async (a) => {
       const hits = await b.symbol(s(a.name, "name"));
       return hits.length ? hits.map((h) => `${h.file}:${h.line}-${h.end_line} ${h.kind} ${h.signature}${h.doc ? `\n  doc: ${h.doc}` : ""}`).join("\n") : "symbol not found";

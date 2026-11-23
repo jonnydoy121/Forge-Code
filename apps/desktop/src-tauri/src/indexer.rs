@@ -55,6 +55,11 @@ pub fn index_status(state: State<IndexState>) -> Result<Status, String> {
 }
 
 #[tauri::command]
+pub fn index_find_files(state: State<IndexState>, pattern: String, max: Option<usize>) -> Result<Vec<String>, String> {
+    get(&state)?.find_files(&pattern, max.unwrap_or(200))
+}
+
+#[tauri::command]
 pub fn index_grep(state: State<IndexState>, pattern: String, glob: Option<String>, max: Option<usize>) -> Result<Vec<GrepHit>, String> {
     get(&state)?.grep(&pattern, glob.as_deref(), max.unwrap_or(200))
 }

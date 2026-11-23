@@ -666,6 +666,23 @@ impl Index {
         Ok(hits)
     }
 
+    /// Files whose path matches `pattern`, sorted, at most `max`. A pattern with glob characters (`* ? [ {`) is a glob
+    /// (`*.rs` matches anywhere, `src/**/*.ts` is anchored); otherwise it is a case-insensitive substring of the path,
+    /// which is how people look for a file ("auth" finds `src/auth/login.ts`).
+    pub fn find_files(&self, pattern: &str, max: usize) -> Result<Vec<String>, Err> {
+        let st = self.state.read().unwrap();
+        let mut out: Vec<String> = if pattern.contains(['*', '?', '[', '{']) {
+            let m = Self::glob_matcher(pattern)?;
+            st.all_files.iter().filter(|f| m.is_match(f.as_str())).cloned().collect()
+        } else {
+            let needle = pattern.to_lowercase();
+            st.all_files.iter().filter(|f| f.to_lowercase().contains(&needle)).cloned().collect()
+        };
+        out.sort();
+        out.truncate(max);
+        Ok(out)
+    }
+
     fn doc_above(&self, rel: &str, line: u32) -> String {
         let Ok(text) = std::fs::read_to_string(self.abs(rel)) else { return String::new() };
         let lines: Vec<&str> = text.lines().collect();

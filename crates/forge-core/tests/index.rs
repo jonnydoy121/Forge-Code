@@ -319,3 +319,23 @@ fn a_first_index_gives_exactly_the_same_index_as_building_the_same_files_increme
     assert_eq!(format!("{:?}", again.symbol("validatePassword")), format!("{:?}", b.symbol("validatePassword")));
     assert_eq!(again.build(&|_| {}).unwrap().reparsed, 0);
 }
+
+#[test]
+fn find_files_matches_globs_and_plain_substrings_and_skips_excluded_files() {
+    let (_r, _d, idx) = built();
+    // A glob without a slash matches by name anywhere; with a slash it is anchored.
+    assert_eq!(idx.find_files("*.py", 100).unwrap(), ["pkg/mod.py", "pkg/util.py"]);
+    assert_eq!(idx.find_files("src/*.ts", 100).unwrap(), ["src/api.ts", "src/auth.ts", "src/user.test.ts", "src/user.ts"]);
+    assert_eq!(idx.find_files("**/*.test.ts", 100).unwrap(), ["src/user.test.ts"]);
+    // No glob characters: a case-insensitive substring of the path.
+    assert_eq!(idx.find_files("AUTH", 100).unwrap(), ["src/auth.ts"]);
+    assert_eq!(idx.find_files("user", 100).unwrap(), ["src/user.test.ts", "src/user.ts"]);
+    // The limit applies after sorting, so the same files come first every time.
+    assert_eq!(idx.find_files("*.ts", 2).unwrap(), ["matrix.ts", "src/api.ts"]);
+    // Ignored, excluded and dependency files are not in the index, so they are never listed.
+    for hidden in ["hidden", "private", "node_modules", ".env"] {
+        assert!(idx.find_files(hidden, 100).unwrap().is_empty(), "{hidden} must not be found");
+    }
+    assert!(idx.find_files("nothing-like-this", 100).unwrap().is_empty());
+    assert!(idx.find_files("[", 100).is_err(), "a malformed glob is an error, not a panic");
+}

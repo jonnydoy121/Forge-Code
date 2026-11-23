@@ -63,4 +63,25 @@ describe("ls and grep", () => {
     expect((await call("grep", { pattern: "hello", glob: "*.py" })).output).toBe("src/b.py:1:def hello():");
     expect((await call("grep", { pattern: "supersecret" })).output).toBe("no matches");
   });
+  it("grep can ignore case and list only the files that match", async () => {
+    expect((await call("grep", { pattern: "HELLO" })).output).toBe("no matches");
+    const loose = (await call("grep", { pattern: "HELLO", ignore_case: true })).output.split("\n").sort();
+    expect(loose).toEqual(["src/a.ts:2:export function hello() {}", "src/b.py:1:def hello():"]);
+    expect((await call("grep", { pattern: "hello", files_only: true })).output.split("\n").sort()).toEqual(["src/a.ts", "src/b.py"]);
+    expect((await call("grep", { pattern: "hello", files_only: true, glob: "*.py" })).output).toBe("src/b.py");
+  });
+});
+
+describe("find_files", () => {
+  it("finds by glob anywhere, by anchored glob, and by case-insensitive substring; never lists ignored or secret files", async () => {
+    expect((await call("find_files", { pattern: "*.py" })).output).toBe("src/b.py");
+    expect((await call("find_files", { pattern: "src/*.ts" })).output).toBe("src/a.ts");
+    expect((await call("find_files", { pattern: "B.P" })).output).toBe("src/b.py");
+    expect((await call("find_files", { pattern: "*.{ts,py}" })).output.split("\n").sort()).toEqual(["src/a.ts", "src/b.py"]);
+    for (const hidden of ["env", "node_modules", "i.js"]) expect((await call("find_files", { pattern: hidden })).output, hidden).toBe("no files found");
+  });
+  it("is a read tool: available in ask mode, and a missing pattern is a tool error", async () => {
+    expect(host().listTools("ask").map((t) => t.name)).toContain("find_files");
+    expect((await call("find_files", {})).ok).toBe(false);
+  });
 });

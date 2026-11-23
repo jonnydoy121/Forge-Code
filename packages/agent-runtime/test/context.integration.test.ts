@@ -208,7 +208,7 @@ describe("sub-agents", () => {
     expect(childGateway.requests[0]!.messages.filter((m) => m.role === "user")).toHaveLength(1);
     expect(childGateway.requests[0]!.messages.map((m) => m.content).join()).not.toContain("who calls X?");
     // the child cannot edit or delegate further
-    expect(childGateway.requests[0]!.tools!.map((t) => t.name)).toEqual(["read_file", "ls", "grep"]);
+    expect(childGateway.requests[0]!.tools!.map((t) => t.name)).toEqual(["read_file", "ls", "grep", "find_files"]);
   });
 
   it("reports early stops and empty reports honestly", async () => {

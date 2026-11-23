@@ -32,6 +32,34 @@ describe("Indexer contract", () => {
   });
 });
 
+describe("grep and find_files tools", () => {
+  it("grep passes ignore_case to the backend as an inline flag and files_only lists each file once", async () => {
+    const seen: string[] = [];
+    const b = fakeBackend({
+      grep: async (pattern) => {
+        seen.push(pattern);
+        return [
+          { file: "src/b.ts", line: 1, text: "x" },
+          { file: "src/a.ts", line: 9, text: "x" },
+          { file: "src/a.ts", line: 3, text: "x" },
+        ];
+      },
+    });
+    expect((await call(b, "grep", { pattern: "needle", ignore_case: true })).output).toContain("src/b.ts:1:x");
+    expect(seen[0]).toBe("(?i)needle");
+    expect((await call(b, "grep", { pattern: "needle" })).ok).toBe(true);
+    expect(seen[1]).toBe("needle");
+    expect((await call(b, "grep", { pattern: "needle", files_only: true })).output).toBe("src/a.ts" + "\n" + "src/b.ts");
+  });
+  it("find_files is only offered when the backend can list files", async () => {
+    expect(host(fakeBackend()).listTools("ask").map((t) => t.name)).not.toContain("find_files");
+    const b = fakeBackend({ findFiles: async (p) => (p === "auth" ? ["src/auth.ts", "src/auth.test.ts"] : []) });
+    expect(host(b).listTools("ask").map((t) => t.name)).toContain("find_files");
+    expect((await call(b, "find_files", { pattern: "auth" })).output).toBe("src/auth.ts" + "\n" + "src/auth.test.ts");
+    expect((await call(b, "find_files", { pattern: "zzz" })).output).toBe("no files found");
+  });
+});
+
 describe("retrieval tools", () => {
   it("are all read-class so Ask/Plan mode can use them", () => {
     const names = host(fakeBackend()).listTools("ask").map((t) => t.name);

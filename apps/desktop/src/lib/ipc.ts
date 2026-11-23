@@ -53,6 +53,7 @@ export const indexApi = {
 
 export const indexBackend: IndexBackend = {
   grep: (pattern, glob, max) => invoke("index_grep", { pattern, glob: glob ?? null, max: max ?? null }),
+  findFiles: (pattern, max) => invoke("index_find_files", { pattern, max: max ?? null }),
   symbol: (name) => invoke("index_symbol", { name }),
   references: (symbol) => invoke("index_references", { symbol }),
   repoMap: (focusFiles, tokenBudget) => invoke("index_repo_map", { focusFiles, tokenBudget }),

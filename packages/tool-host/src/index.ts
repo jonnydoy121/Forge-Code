@@ -58,6 +58,19 @@ async function* walk(ctx: ToolContext, dir: string): AsyncIterable<string> {
   }
 }
 
+/** A glob without a slash matches by name anywhere in the tree (`*.ts`), like ripgrep and the indexer; with a slash it is anchored. */
+const workspaceGlob = (g: string): { test(rel: string): boolean } => {
+  const res = expandBraces(g.includes("/") ? g : `**/${g}`).map(globToRegExp);
+  return { test: (rel) => res.some((re) => re.test(rel)) };
+};
+
+/** `*.{ts,py}` as `*.ts` and `*.py` (one level of braces per pass, so nested groups work too). */
+function expandBraces(g: string): string[] {
+  const m = /\{([^{}]*)\}/.exec(g);
+  if (!m) return [g];
+  return m[1]!.split(",").flatMap((alt) => expandBraces(g.slice(0, m.index) + alt + g.slice(m.index + m[0].length)));
+}
+
 export const readFileTool: RegisteredTool = {
   spec: {
     name: "read_file",
@@ -100,13 +113,14 @@ export const lsTool: RegisteredTool = {
 export const grepTool: RegisteredTool = {
   spec: {
     name: "grep",
-    description: "Search workspace files for a regular expression. Optional glob filters paths (e.g. src/**/*.ts). Returns path:line:text.",
-    parameters: { type: "object", properties: { pattern: { type: "string" }, glob: { type: "string" } }, required: ["pattern"] },
+    description: "Search workspace files for a regular expression. Optional glob filters paths (e.g. src/**/*.ts or *.py). Set ignore_case for a case-insensitive search and files_only to list just the matching file paths. Returns path:line:text.",
+    parameters: { type: "object", properties: { pattern: { type: "string" }, glob: { type: "string" }, ignore_case: { type: "boolean" }, files_only: { type: "boolean" } }, required: ["pattern"] },
     class: "read",
   },
   async run(args, ctx) {
-    const re = new RegExp(str(args.pattern, "pattern"));
-    const glob = typeof args.glob === "string" && args.glob ? globToRegExp(args.glob) : null;
+    const re = new RegExp(str(args.pattern, "pattern"), args.ignore_case === true ? "i" : "");
+    const glob = typeof args.glob === "string" && args.glob ? workspaceGlob(args.glob) : null;
+    const filesOnly = args.files_only === true;
     const hits: string[] = [];
     for await (const file of walk(ctx, resolveInRoot(ctx.root, "."))) {
       const rel = relativeTo(ctx.root, file);
@@ -121,7 +135,11 @@ export const grepTool: RegisteredTool = {
       const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (re.test(lines[i]!)) {
-          hits.push(`${rel}:${i + 1}:${lines[i]!.trim().slice(0, 200)}`);
+          hits.push(filesOnly ? rel : `${rel}:${i + 1}:${lines[i]!.trim().slice(0, 200)}`);
+          if (filesOnly) {
+            if (hits.length >= MAX_GREP_MATCHES) return truncate(redactSecrets(hits.join("\n") + `\n[stopped at ${MAX_GREP_MATCHES} files]`));
+            break; // one matching line is enough to list the file
+          }
           if (hits.length >= MAX_GREP_MATCHES) return truncate(redactSecrets(hits.join("\n") + `\n[stopped at ${MAX_GREP_MATCHES} matches]`));
         }
       }
@@ -130,7 +148,37 @@ export const grepTool: RegisteredTool = {
   },
 };
 
-export const READ_TOOLS = [readFileTool, lsTool, grepTool];
+/** Same matching rule as the indexer's `find_files`: a pattern with glob characters is a glob, anything else a case-insensitive substring of the path. */
+export function pathMatcher(pattern: string): (rel: string) => boolean {
+  if (/[*?[{]/.test(pattern)) {
+    const re = workspaceGlob(pattern);
+    return (rel) => re.test(rel);
+  }
+  const needle = pattern.toLowerCase();
+  return (rel) => rel.toLowerCase().includes(needle);
+}
+
+export const findFilesTool: RegisteredTool = {
+  spec: {
+    name: "find_files",
+    description: "Find files by name. A pattern with * ? or {a,b} is a glob (*.test.ts matches anywhere, src/**/*.ts is anchored); anything else is a case-insensitive part of the path (auth finds src/auth/login.ts). Returns sorted workspace paths.",
+    parameters: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] },
+    class: "read",
+  },
+  async run(args, ctx) {
+    const match = pathMatcher(str(args.pattern, "pattern"));
+    const found: string[] = [];
+    for await (const file of walk(ctx, resolveInRoot(ctx.root, "."))) {
+      const rel = relativeTo(ctx.root, file);
+      if (isSecretPath(file) || !match(rel)) continue;
+      found.push(rel);
+      if (found.length >= MAX_GREP_MATCHES) return found.join("\n") + `\n[stopped at ${MAX_GREP_MATCHES} files]`;
+    }
+    return found.length ? truncate(found.join("\n")) : "no files found";
+  },
+};
+
+export const READ_TOOLS = [readFileTool, lsTool, grepTool, findFilesTool];
 
 export interface ToolHostOptions extends ToolContext {
   tools?: RegisteredTool[];

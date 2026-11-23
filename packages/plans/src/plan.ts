@@ -209,7 +209,7 @@ One or two sentences: what will be true when this is done.
 
 const PLAN_MODE_PROMPT = `You are in PLAN mode. Do not try to change code: you can only read, ask questions and write the plan file.
 Workflow:
-1. Research with repo_map, semantic_search, grep, symbol, references and dependency_cone. List the files you read.
+1. Research with repo_map, semantic_search, grep, find_files, symbol, references and dependency_cone. List the files you read.
 2. If the request is ambiguous, call ask_user ONCE with at most 3 targeted questions, each with a suggested default.
 3. Call write_plan with a complete plan in exactly this structure. Every task needs an acceptance check that can be verified by running something.
 4. Before changing a shared symbol, call references and list every affected file under "Files to change".

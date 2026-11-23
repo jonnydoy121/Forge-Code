@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+### Agent tools: find files, better grep
+- New `find_files` tool: find files by name. A pattern with `* ? [ {` is a glob (`*.test.ts` matches anywhere, `src/**/*.ts` is anchored, `*.{ts,py}` works); anything else is a case-insensitive part of the path (`auth` finds `src/auth/login.ts`). Answered from the Rust index (honours .gitignore, never lists excluded or secret files); a plain-walk fallback covers the CLI and an index that is not ready. Read-class, so Ask and Plan mode have it.
+- `grep` gains `ignore_case` and `files_only` (each matching file once, however many hits it has), in both the indexer and the fallback. The fallback's glob now follows the indexer's rule (a pattern without a slash matches by name anywhere) and supports `{a,b}`.
+- Tests: Rust (`find_files`), tool-host and indexer units, and `find-files.spec.ts` in the real window (a gitignored decoy file proves the index answered).
+
 ### UI: more light-theme fixes
 - The inline-edit box was a solid black input in the light theme (a hard-coded dark background); it and the reply code blocks now use theme variables. A unit test fails if any component hard-codes a neutral/gray background again (checked by adding one).
 - Audit filters are toggle chips with a visible selected state and `aria-pressed`.
