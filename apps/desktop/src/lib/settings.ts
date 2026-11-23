@@ -35,6 +35,22 @@ export interface AgentSettings {
   embedUrl: string;
   /** wall-clock seconds for one agent run */
   maxSeconds: number;
+  // Model routing (all optional; with none set every request uses the main model above, the "builder").
+  /** scout: a small fast cheap model for chores (summaries, commit messages) and, with triage, simple requests. "" = off */
+  scoutProvider: ProviderConfig["kind"] | "";
+  scoutModel: string;
+  scoutBaseUrl: string;
+  /** architect: the strongest model, for plan mode and for fixes the builder could not get right. "" = off */
+  architectProvider: ProviderConfig["kind"] | "";
+  architectModel: string;
+  architectBaseUrl: string;
+  /** API keys for a tier on a different provider than the main model. Kept in the OS credential store, never in local storage. */
+  scoutApiKey: string;
+  architectApiKey: string;
+  /** failed check rounds after which the architect takes over (the builder gets the rounds before) */
+  escalateAfter: number;
+  /** how to size up a request: off, by its wording (free), or by asking the scout model first */
+  triage: "off" | "heuristic" | "model";
 }
 
 export const DEFAULT_MODELS: Record<AgentSettings["provider"], string> = {
@@ -64,6 +80,16 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   runtimeProcess: true,
   embedUrl: "http://127.0.0.1:11434",
   maxSeconds: 1800,
+  scoutProvider: "",
+  scoutModel: "",
+  scoutBaseUrl: "",
+  architectProvider: "",
+  architectModel: "",
+  architectBaseUrl: "",
+  scoutApiKey: "",
+  architectApiKey: "",
+  escalateAfter: 2,
+  triage: "off",
 };
 
 const KEY = "forge.settings.v1";
@@ -83,7 +109,7 @@ export const SETTINGS_EVENT = "forge-settings";
 
 export function saveSettings(s: AgentSettings, storage: StorageLike = localStorage) {
   // The API key is kept in the OS credential store, never in local storage.
-  storage.setItem(KEY, JSON.stringify({ ...s, apiKey: "" }));
+  storage.setItem(KEY, JSON.stringify({ ...s, apiKey: "", scoutApiKey: "", architectApiKey: "" }));
   // Tell the rest of the app instead of making it poll for changes.
   if (typeof window !== "undefined") window.dispatchEvent(new Event(SETTINGS_EVENT));
 }

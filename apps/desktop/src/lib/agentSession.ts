@@ -8,6 +8,8 @@ import { openRuntimePort, sidecarPath } from "./runtimeProcess";
 import { mark } from "./trace";
 import { fsApi, indexBackend } from "./ipc";
 import type { AgentSettings } from "./settings";
+import { loadApiKey } from "./secrets";
+import { disabledTiers, routingFromSettings, tierProvider, tierSetting, type TierName } from "./modelRouting";
 import type { WorkspaceServices } from "./workspace";
 
 export const tauriFs: FsBackend = {
@@ -17,7 +19,17 @@ export const tauriFs: FsBackend = {
 };
 
 /** A gateway whose every request goes through the guarded, logged fetch (local-only mode, network log). */
-function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
+/** The API key for each configured tier: the main key when the tier uses the same provider, else the one saved for that provider. */
+async function tierKeys(settings: AgentSettings): Promise<Partial<Record<TierName, string>>> {
+  const keys: Partial<Record<TierName, string>> = {};
+  for (const t of ["scout", "architect"] as const) {
+    const cfg = tierSetting(settings, t);
+    if (cfg) keys[t] = cfg.kind === settings.provider ? settings.apiKey : (t === "scout" ? settings.scoutApiKey : settings.architectApiKey) || (await loadApiKey(cfg.kind));
+  }
+  return keys;
+}
+
+function makeGateway(services: WorkspaceServices, settings: AgentSettings, keys: Partial<Record<TierName, string>> = {}) {
   const gateway = new Gateway({
     fetch: services.fetch,
     onRequest: (i) => {
@@ -26,6 +38,11 @@ function makeGateway(services: WorkspaceServices, settings: AgentSettings) {
     },
   });
   gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
+  // Each routing tier is its own provider name; "default" stays the main model (the builder).
+  for (const t of ["scout", "architect"] as const) {
+    const cfg = tierSetting(settings, t);
+    if (cfg) gateway.register(tierProvider(t), { kind: cfg.kind, baseUrl: cfg.baseUrl || undefined, apiKey: keys[t] || undefined });
+  }
   return gateway;
 }
 
@@ -53,7 +70,7 @@ export async function createSession(opts: {
 }) {
   const { settings, services } = opts;
   mark("createSession: start");
-  const gateway = makeGateway(services, settings);
+  const gateway = makeGateway(services, settings, await tierKeys(settings));
   const audit = (kind: "model" | "tool", prefix = "") => (e: { kind: "model" | "tool"; name: string; detail?: string }) =>
     services.audit.record({ kind: e.kind === "model" ? "model" : kind, name: `${prefix}${e.name}`, detail: e.detail });
 
@@ -89,6 +106,7 @@ export async function createSession(opts: {
   // The agent loop runs outside the UI thread (its own OS process, or a Web Worker as the fallback). Everything that
   // needs Tauri IPC (files, HTTP, permissions, indexing) stays here and is served to it over messages.
   mark("createSession: tools built");
+  const routing = routingFromSettings(settings);
   const transport = typeof Worker !== "undefined" ? await openPort(settings.runtimeProcess) : null;
   mark("createSession: agent process port ready");
   const runtime: AgentRuntime =
@@ -105,7 +123,7 @@ export async function createSession(opts: {
             verify: services.verifyDeps,
             audit: auditEntry,
           },
-          { provider: "default", model: settings.model, budgetTokens: settings.budgetTokens, compaction: { threshold: settings.compactionThreshold }, limits },
+          { provider: "default", model: settings.model, budgetTokens: settings.budgetTokens, compaction: { threshold: settings.compactionThreshold }, limits, routing },
         )
       : (new Runtime({
           gateway,
@@ -120,6 +138,7 @@ export async function createSession(opts: {
           budgetTokens: settings.budgetTokens,
           compaction: { threshold: settings.compactionThreshold },
           limits,
+          routing,
           audit: auditEntry,
         }) as unknown as AgentRuntime);
   runtime.transport = transport?.kind ?? "inline";
@@ -132,10 +151,13 @@ export async function createSession(opts: {
 }
 
 /** One-shot completion without tools (commit messages, summaries). Returns the streamed text. */
-export async function completeOnce(settings: AgentSettings, services: WorkspaceServices, prompt: string): Promise<string> {
-  const gateway = makeGateway(services, settings);
+export async function completeOnce(settings: AgentSettings, services: WorkspaceServices, prompt: string, opts: { tier?: "scout" } = {}): Promise<string> {
+  const gateway = makeGateway(services, settings, await tierKeys(settings));
+  // A chore (a commit message, a summary) goes to the scout model when there is one and it is allowed; otherwise the main model.
+  const scout = opts.tier === "scout" ? tierSetting(settings, "scout") : null;
+  const route = scout && !disabledTiers(settings).includes("scout") ? { provider: tierProvider("scout"), model: scout.model } : { provider: "default", model: settings.model };
   let text = "";
-  for await (const ev of gateway.stream({ provider: "default", model: settings.model, messages: [{ role: "user", content: prompt }] })) {
+  for await (const ev of gateway.stream({ ...route, messages: [{ role: "user", content: prompt }] })) {
     if (ev.type === "text") text += ev.delta;
   }
   return text.trim();

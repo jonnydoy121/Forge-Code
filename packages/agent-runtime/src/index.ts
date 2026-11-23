@@ -15,10 +15,12 @@ import { detectInjection, quarantine } from "@forge/safety";
 import { feedbackMessage, finalFailureMessage, unverifiedReport, type HookRunner, type TouchedFile, type VerificationReport } from "@forge/verify";
 import { assembleContext, estimateTokens, TokenCalibrator, type AssembledContext, type ContextSection, type MeterEntry } from "./context";
 import { SUMMARY_MARKER, compactionCut, filesTouchedIn, summarizeWith } from "./compaction";
+import { TRIAGE_PROMPT, classifyPrompt, parseComplexity, pickTier, scoutOrBuilder, type Complexity, type RoutingConfig, type Tier } from "./routing";
 
 export * from "./context";
 export * from "./compaction";
 export * from "./subagent";
+export * from "./routing";
 
 const BASE_PROMPT = `You are Forge, an AI coding agent inside a code editor. You work on the user's codebase using the tools provided.
 Rules:
@@ -57,6 +59,8 @@ export interface RuntimeDeps {
   modePrompt?: (mode: Mode) => string | undefined;
   verify?: VerifyDeps;
   hooks?: HookRunner;
+  /** Which model answers which request. Absent: every request goes to `provider`/`model`. */
+  routing?: RoutingConfig;
   compaction?: {
     enabled?: boolean;
     /** Fraction of the token budget at which older turns are summarised. Default 0.8. */
@@ -101,7 +105,9 @@ export class Runtime implements AgentRuntime {
     if (cut <= 0) return null;
     const older = this.history.slice(0, cut);
     const pre = deps.hooks ? await deps.hooks.run("PreCompact") : null;
-    const summarize = deps.compaction?.summarize ?? ((msgs: Message[], extra: string) => summarizeWith(deps.gateway, deps.provider, deps.model, msgs, extra));
+    // Summarising older turns is a chore: the scout model does it when there is one.
+    const chore = scoutOrBuilder(deps.routing, { provider: deps.provider, model: deps.model });
+    const summarize = deps.compaction?.summarize ?? ((msgs: Message[], extra: string) => summarizeWith(deps.gateway, chore.provider, chore.model, msgs, extra));
     const body = (await summarize(older, pre?.output ?? "")).trim();
     if (!body) return null;
     const files = filesTouchedIn(older);
@@ -117,6 +123,35 @@ ${summary}` });
   }
 
   constructor(private deps: RuntimeDeps) {}
+
+  /**
+   * Size up a request before answering it. The heuristic is free and instant; "model" asks the scout model first, with a short
+   * timeout, and falls back to the heuristic if it is slow, fails or answers with anything but one of the three words.
+   */
+  private async triage(prompt: string, mode: Mode): Promise<Complexity | undefined> {
+    const cfg = this.deps.routing;
+    if (!cfg || (cfg.triage ?? "off") === "off") return undefined;
+    const guess = classifyPrompt(prompt, mode).complexity;
+    const scout = cfg.scout && !cfg.disabled?.includes("scout") ? cfg.scout : undefined;
+    if (cfg.triage !== "model" || !scout || this.signal?.aborted) return guess;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2000);
+    const onAbort = () => ctl.abort();
+    this.signal?.addEventListener("abort", onAbort);
+    try {
+      let answer = "";
+      for await (const ev of this.deps.gateway.stream({ provider: scout.provider, model: scout.model, messages: [{ role: "system", content: TRIAGE_PROMPT }, { role: "user", content: redactSecrets(prompt.slice(0, 2000)) }], signal: ctl.signal })) {
+        if (ev.type === "text") answer += ev.delta;
+        else if (ev.type === "done") this.costUsd += ev.usage.costUsd;
+      }
+      return parseComplexity(answer) ?? guess;
+    } catch {
+      return guess;
+    } finally {
+      clearTimeout(timer);
+      this.signal?.removeEventListener("abort", onAbort);
+    }
+  }
 
   setModel(provider: string, model: string) {
     this.deps.provider = provider;
@@ -165,6 +200,9 @@ ${summary}` });
     let finalReport = false; // verification kept failing: one last tool-less turn to report
     let stopHookRan = false;
     let unverifiedAnnounced = false;
+    // Routing: sized up once per run; the tier itself is chosen again for every request from how the run is going.
+    const complexity = await this.triage(req.prompt, req.mode);
+    let lastTier: Tier = "builder";
 
     const rel = (p: string) => {
       const root = deps.verify?.root.replace(/\/+$/, "") ?? "";
@@ -222,13 +260,16 @@ ${summary}` });
       }
       this.lastContext = ctx;
       this.lastEstimate = ctx.totalTokens + toolTokens;
-      deps.audit?.({ kind: "model", name: `${deps.provider}/${deps.model}`, detail: `${ctx.totalTokens} tokens` });
+      const choice = pickTier(deps.routing, { provider: deps.provider, model: deps.model }, { mode: req.mode, failedChecks: attempts, complexity });
+      if (deps.routing && choice.tier !== lastTier) yield { type: "route", tier: choice.tier, provider: choice.route.provider, model: choice.route.model, reason: choice.reason };
+      lastTier = choice.tier;
+      deps.audit?.({ kind: "model", name: `${choice.route.provider}/${choice.route.model}`, detail: `${ctx.totalTokens} tokens${deps.routing ? `, ${choice.tier}: ${choice.reason}` : ""}` });
 
       let text = "";
       const calls: ToolCall[] = [];
       for await (const ev of deps.gateway.stream({
-        provider: deps.provider,
-        model: deps.model,
+        provider: choice.route.provider,
+        model: choice.route.model,
         // Secrets never leave the machine, whatever their source: redact everything sent to the model.
         messages: ([...ctx.systemParts.map((content) => ({ role: "system", content })), ...ctx.history] as Message[]).map((m) => ({ ...m, content: redactSecrets(m.content) })),
         tools: specs,

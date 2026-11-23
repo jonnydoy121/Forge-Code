@@ -29,6 +29,14 @@ async function drain(it: AsyncIterable<AgentEvent>) {
 }
 
 describe("RuntimeClient over a worker-style port", () => {
+  it("carries the routing config to the loop and the route event back: plan mode reaches the host addressed to the architect", async () => {
+    const gw = new ScriptedGateway([[text("the plan"), done]]);
+    const c = connect({ gateway: gw }, { routing: { architect: { provider: "architect", model: "big-model" }, scout: { provider: "scout", model: "small-model" } } });
+    const events = await drain(c.run({ mode: "plan", prompt: "plan it" }));
+    expect(gw.requests.map((r) => `${r.provider}/${r.model}`)).toEqual(["architect/big-model"]);
+    expect(events.find((e) => e.type === "route")).toEqual({ type: "route", tier: "architect", provider: "architect", model: "big-model", reason: "plan mode" });
+  });
+
   it("streams events, runs tools on the host, and mirrors history and cost afterwards", async () => {
     const gw = new ScriptedGateway([[call("1", "read_file", { path: "a.ts" }), done], [text("It reads a.ts."), done]]);
     const c = connect({ gateway: gw });

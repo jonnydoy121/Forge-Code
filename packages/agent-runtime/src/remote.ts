@@ -46,6 +46,8 @@ export interface RuntimeConfig {
   limits?: RuntimeDeps["limits"];
   compaction?: { enabled?: boolean; threshold?: number; keepRecent?: number };
   basePrompt?: string;
+  /** Which model answers which request (scout, builder, architect). Plain data, so it crosses to the worker. */
+  routing?: RuntimeDeps["routing"];
 }
 
 /** Static, serialisable facts the worker needs up front (it cannot call sync functions on the main thread). */
@@ -164,6 +166,7 @@ export function serveRuntime(port: Port): () => void {
       budgetTokens: m.config.budgetTokens,
       limits: m.config.limits,
       compaction: m.config.compaction,
+      routing: m.config.routing,
       basePrompt: m.config.basePrompt,
       modePrompt: (mode) => m.modePrompts[mode],
       sections: m.hasSections ? () => call<ContextSection[]>("sections") : undefined,

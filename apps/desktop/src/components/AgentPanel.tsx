@@ -14,6 +14,7 @@ import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
 import { prewarmRuntime } from "../lib/runtimeProcess";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
+import { tierIsRemote, tierSetting, tiersSendOffMachine, type TierName } from "../lib/modelRouting";
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
 import { Timeline } from "./Timeline";
@@ -98,6 +99,37 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+/** One routing tier: which provider and model, and (for a provider other than the main one) its API key. */
+function TierRow({ tier, title, hint, settings, update }: { tier: TierName; title: string; hint: string; settings: AgentSettings; update: (p: Partial<AgentSettings>) => void }) {
+  const kindKey = `${tier}Provider` as const;
+  const modelKey = `${tier}Model` as const;
+  const urlKey = `${tier}BaseUrl` as const;
+  const keyKey = `${tier}ApiKey` as const;
+  const kind = settings[kindKey];
+  const cfg = tierSetting(settings, tier);
+  return (
+    <div className="space-y-1 rounded border border-[var(--border)] p-2" data-testid={`tier-${tier}`}>
+      <div className="font-medium">{title} <span className="font-normal text-[var(--muted)]">{hint}</span></div>
+      <Row label="Provider">
+        <select data-testid={`${tier}-provider`} className="rounded bg-[var(--hover)] px-1 py-0.5" value={kind} onChange={(e) => update({ [kindKey]: e.target.value, ...(e.target.value && !settings[modelKey] ? { [modelKey]: DEFAULT_MODELS[e.target.value as AgentSettings["provider"]] } : {}) } as Partial<AgentSettings>)}>
+          <option value="">Off (use the main model)</option>
+          <option value="ollama">Ollama (local)</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI-compatible</option>
+        </select>
+      </Row>
+      {kind && (
+        <>
+          <Row label="Model"><input data-testid={`${tier}-model`} className={FIELD} value={settings[modelKey]} onChange={(e) => update({ [modelKey]: e.target.value } as Partial<AgentSettings>)} /></Row>
+          <Row label="Base URL"><input data-testid={`${tier}-base-url`} className={FIELD} placeholder="default" value={settings[urlKey]} onChange={(e) => update({ [urlKey]: e.target.value } as Partial<AgentSettings>)} /></Row>
+          {kind !== settings.provider && kind !== "ollama" && <Row label="API key"><input type="password" className={FIELD} value={settings[keyKey]} onChange={(e) => update({ [keyKey]: e.target.value } as Partial<AgentSettings>)} /></Row>}
+          {cfg && tierIsRemote(settings, tier) && <p className="text-amber-400">Remote: prompts sent to this tier leave your machine.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Check({ checked, onChange, testId, children }: { checked: boolean; onChange: (v: boolean) => void; testId?: string; children: React.ReactNode }) {
   return (
     <label className="flex items-start gap-2">
@@ -135,6 +167,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const [showTimeline, setShowTimeline] = useState(false);
   const [suggest, setSuggest] = useState<string | null>(null);
   const runtime = useRef<AgentRuntime | null>(null);
+  const resetHistory = useRef<Message[] | null>(null); // the conversation, kept when a settings change ends the session
+  const lastRoot = useRef(root);
   const abort = useRef<AbortController | null>(null);
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
@@ -150,8 +184,14 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     if (services) void services.prompts().then(setPrompts).catch(() => setPrompts([]));
   }, [services, version]);
   useEffect(() => {
+    // New workspace: a new conversation. A settings change: a fresh session on the next send (it captures the model, tools and
+    // limits when it is created), but the conversation is kept, because the panel keeps showing it.
+    const sameRoot = lastRoot.current === root;
+    lastRoot.current = root;
+    if (!sameRoot) resetHistory.current = null;
+    else if (runtime.current) resetHistory.current = [...runtime.current.history];
     runtime.current?.terminate?.();
-    runtime.current = null; // new workspace or settings: build a fresh session on next send
+    runtime.current = null;
   }, [root, settings]);
   useEffect(() => () => runtime.current?.terminate?.(), []); // closing a thread releases its worker/process
   useEffect(() => {
@@ -180,11 +220,21 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     void migrateLegacyKey().then(() => loadApiKey(settings.provider)).then((k) => setSettings((cur) => (cur.apiKey === k ? cur : { ...cur, apiKey: k })));
   }, [settings.provider]);
 
+  // The keys for a tier on another provider also live in the credential store: load them when the tier's provider changes.
+  useEffect(() => {
+    for (const t of ["scout", "architect"] as const) {
+      const kind = t === "scout" ? settings.scoutProvider : settings.architectProvider;
+      if (kind) void loadApiKey(kind).then((k) => setSettings((cur) => (cur[`${t}ApiKey` as const] === k ? cur : { ...cur, [`${t}ApiKey`]: k })));
+    }
+  }, [settings.scoutProvider, settings.architectProvider]);
+
   const update = (patch: Partial<AgentSettings>) => {
     const next = { ...settings, ...patch };
     setSettings(next);
     saveSettings(next);
     if (patch.apiKey !== undefined) void storeApiKey(next.provider, patch.apiKey);
+    if (patch.scoutApiKey !== undefined && next.scoutProvider) void storeApiKey(next.scoutProvider, patch.scoutApiKey);
+    if (patch.architectApiKey !== undefined && next.architectProvider) void storeApiKey(next.architectProvider, patch.architectApiKey);
   };
 
   async function send(override?: { prompt: string; mode?: Mode; skipSuggest?: boolean }): Promise<RunOutcome> {
@@ -236,7 +286,10 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     let began = false;
     try {
       // If the process behind the last session died, start a fresh one and carry the conversation over.
-      const carried = runtime.current?.isDead ? runtime.current.history : null;
+      // A dead process and a settings change both start a fresh session; either way the conversation carries over, so the model
+      // still knows what the panel shows.
+      const carried = runtime.current?.isDead ? runtime.current.history : resetHistory.current;
+      resetHistory.current = null;
       if (!runtime.current || runtime.current.isDead) {
         runtime.current = await createSession({
           isolated,
@@ -347,6 +400,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           onReport({ report, source: "agent", seq });
         } else if (ev.type === "injection") {
           setItems((i) => replaceLastAssistant(i, [{ kind: "injection", tool: ev.tool, findings: ev.findings }, { kind: "assistant", text: "" }]));
+        } else if (ev.type === "route") {
+          setItems((i) => replaceLastAssistant(i, [{ kind: "notice", text: `Model: ${ev.tier} (${ev.model}). ${ev.reason}.` }, { kind: "assistant", text: "" }]));
         } else if (ev.type === "compaction") {
           setItems((i) => replaceLastAssistant(i, [{ kind: "compaction", summary: ev.summary, removed: ev.removedMessages, before: ev.tokensBefore, after: ev.tokensAfter }, { kind: "assistant", text: "" }]));
         } else if (ev.type === "hook") {
@@ -424,7 +479,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
     });
   }, [registerSend, active]);
 
-  const offMachine = sendsCodeOffMachine(settings);
+  const offMachine = sendsCodeOffMachine(settings) || tiersSendOffMachine(settings);
   const category = (id: string) => (id === "system" || id === "mode" ? "System prompt" : id === "rules" ? "Rules" : id === "memories" ? "Memories" : id === "plan" ? "Plan" : id === "repo-map" ? "Repo map" : id === "conversation" ? "Conversation" : "Attachments");
   const byCategory = new Map<string, number>();
   for (const e of meter?.entries ?? []) byCategory.set(category(e.id), (byCategory.get(category(e.id)) ?? 0) + e.tokens);
@@ -455,7 +510,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             <option key={a.name} value={`ext:${a.name}`}>external: {a.name}</option>
           ))}
         </select>
-        <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={offMachine ? "Prompts and attached code are sent to a remote server" : "Local model: nothing leaves this machine"}>
+        <span className={`ml-auto text-xs ${offMachine ? "text-amber-400" : "text-green-400"}`} data-testid="privacy-badge" title={offMachine ? (sendsCodeOffMachine(settings) ? "Prompts and attached code are sent to a remote server" : "The main model is local, but a routing tier (scout or architect) is remote: some prompts and attached code can leave this machine") : "Local model: nothing leaves this machine"}>
           {offMachine ? "remote" : "local"}
         </span>
         <button className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--hover)]" data-testid="timeline-toggle" onClick={() => { setShowTimeline((s) => !s); setShowAudit(false); }}>Checkpoints</button>
@@ -473,10 +528,24 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               <option value="openai">OpenAI-compatible</option>
             </select>
           </Row>
-          <Row label="Model"><input className={FIELD} value={settings.model} onChange={(e) => update({ model: e.target.value })} /></Row>
+          <Row label="Model"><input data-testid="main-model" className={FIELD} value={settings.model} onChange={(e) => update({ model: e.target.value })} /></Row>
           <Row label="Base URL"><input data-testid="base-url" className={FIELD} placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></Row>
           <Row label="API key"><input type="password" className={FIELD} value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></Row>
           <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.</p>
+
+          <SettingsHeading>Model routing (optional)</SettingsHeading>
+          <p className="text-[var(--muted)]">Use a cheaper model for chores and a stronger one where it counts. Left off, the main model above does everything.</p>
+          <TierRow tier="scout" title="Scout" hint="Fast and cheap: summarises older turns, writes commit messages, and (with triage) takes simple questions." settings={settings} update={update} />
+          <TierRow tier="architect" title="Architect" hint="Strongest: plan mode, and fixes when the checks keep failing." settings={settings} update={update} />
+          <Row label="Escalate after"><input type="number" min="1" data-testid="escalate-after" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.escalateAfter} onChange={(e) => update({ escalateAfter: Number(e.target.value) || 2 })} /><span className="text-[var(--muted)]">failed checks (the main model gets the earlier ones)</span></Row>
+          <Row label="Triage">
+            <select data-testid="triage" className="rounded bg-[var(--hover)] px-1 py-0.5" value={settings.triage} onChange={(e) => update({ triage: e.target.value as AgentSettings["triage"] })}>
+              <option value="off">Off: main model answers</option>
+              <option value="heuristic">By wording (free, instant)</option>
+              <option value="model">Ask the scout first (one extra call)</option>
+            </select>
+          </Row>
+          {settings.localOnly && (tierIsRemote(settings, "scout") || tierIsRemote(settings, "architect")) && <p className="text-amber-400" data-testid="routing-local-only-note">Local-only mode is on, so a remote scout or architect is skipped and the main model is used.</p>}
 
           <SettingsHeading>Edits and limits</SettingsHeading>
           <Row label="Edits">
@@ -531,7 +600,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               try {
                 return await completeOnce(settings, services, `Write a concise git commit message (imperative mood, max 72 char subject, optional short body) for this change. Reply with the message only.
 
-${diff}`);
+${diff}`, { tier: "scout" });
               } catch {
                 return null;
               }
