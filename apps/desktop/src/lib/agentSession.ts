@@ -1,4 +1,4 @@
-import { Gateway } from "@forge/model-gateway";
+import { Gateway, parsePrices } from "@forge/model-gateway";
 import { Runtime, createSubAgentTool, type ContextSection } from "@forge/agent-runtime";
 import { READ_TOOLS, createToolHost, type FsBackend } from "@forge/tool-host";
 import { createIndexTools } from "@forge/indexer";
@@ -37,6 +37,7 @@ function makeGateway(services: WorkspaceServices, settings: AgentSettings, keys:
       services.audit.record({ kind: "model", name: `${i.provider}/${i.model}`, detail: `${i.url} ${i.local ? "(local)" : "(REMOTE)"}`, local: i.local });
     },
   });
+  gateway.setPrices(parsePrices(settings.customPrices).prices);
   gateway.register("default", { kind: settings.provider, baseUrl: settings.baseUrl || undefined, apiKey: settings.apiKey || undefined });
   // Each routing tier is its own provider name; "default" stays the main model (the builder).
   for (const t of ["scout", "architect"] as const) {

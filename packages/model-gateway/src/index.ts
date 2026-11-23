@@ -1,8 +1,10 @@
 import type { ModelGateway, ModelRequest, StreamEvent } from "@forge/protocol";
-import { HttpError, anthropicAdapter, openAiCompatibleAdapter, type Adapter, type FetchLike } from "./adapters";
+import { HttpError, anthropicAdapter, openAiCompatibleAdapter, type Adapter, type FetchLike, type Price } from "./adapters";
 
 export * from "./adapters";
 export * from "./sse";
+export * from "./prices";
+export * from "./text-tool-calls";
 
 export interface ProviderConfig {
   kind: "anthropic" | "openai" | "ollama";
@@ -28,6 +30,8 @@ const isLocalUrl = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(
 
 export class Gateway implements ModelGateway {
   private adapters = new Map<string, { adapter: Adapter; baseUrl: string }>();
+  /** The user's own prices; adapters hold this object, so changing it applies to the next request. */
+  private customPrices: Record<string, Price> = {};
   private retries: number;
   private sleep: (ms: number) => Promise<void>;
 
@@ -36,12 +40,18 @@ export class Gateway implements ModelGateway {
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
+  /** Prices for models the built-in table does not know (the Max $ limit and the cost meter use them). */
+  setPrices(prices: Record<string, Price>) {
+    for (const k of Object.keys(this.customPrices)) delete this.customPrices[k];
+    Object.assign(this.customPrices, prices);
+  }
+
   register(name: string, cfg: ProviderConfig) {
     const baseUrl = (cfg.baseUrl ?? DEFAULT_URLS[cfg.kind]).replace(/\/$/, "");
     const adapter =
       cfg.kind === "anthropic"
-        ? anthropicAdapter({ baseUrl, apiKey: cfg.apiKey })
-        : openAiCompatibleAdapter({ baseUrl, apiKey: cfg.apiKey }, { free: cfg.kind === "ollama" || isLocalUrl(baseUrl) });
+        ? anthropicAdapter({ baseUrl, apiKey: cfg.apiKey, prices: this.customPrices })
+        : openAiCompatibleAdapter({ baseUrl, apiKey: cfg.apiKey, prices: this.customPrices }, { free: cfg.kind === "ollama" || isLocalUrl(baseUrl) });
     this.adapters.set(name, { adapter, baseUrl });
   }
 

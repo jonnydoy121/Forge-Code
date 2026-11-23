@@ -1,5 +1,6 @@
 import type { Message, ModelRequest, StreamEvent, ToolCall, ToolSpec, Usage } from "@forge/protocol";
 import { parseSse } from "./sse";
+import { mayBeTextToolCall, recoverToolCalls } from "./text-tool-calls";
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -10,6 +11,8 @@ export interface Adapter {
 export interface AdapterConfig {
   baseUrl: string;
   apiKey?: string;
+  /** Prices the user gave for models the built-in table does not know. Read on every request, so later changes apply. */
+  prices?: Record<string, Price>;
 }
 
 /** One model's price in USD per million tokens. */
@@ -44,8 +47,13 @@ export interface TokenCounts {
   cacheWrite?: number;
 }
 
-export function usageCost(model: string, t: TokenCounts): number {
-  const p = PRICES[model];
+/** The price of a model: the user's own, else the built-in table; undefined when neither knows it. */
+export function priceOf(model: string, custom?: Record<string, Price>): Price | undefined {
+  return custom?.[model] ?? PRICES[model];
+}
+
+export function usageCost(model: string, t: TokenCounts, custom?: Record<string, Price>): number {
+  const p = priceOf(model, custom);
   if (!p) return 0;
   const read = t.cacheRead ?? 0;
   const write = t.cacheWrite ?? 0;
@@ -54,8 +62,8 @@ export function usageCost(model: string, t: TokenCounts): number {
 }
 
 /** Cost of a request with no caching involved. */
-export function costFor(model: string, input: number, output: number): number {
-  return usageCost(model, { input, output });
+export function costFor(model: string, input: number, output: number, custom?: Record<string, Price>): number {
+  return usageCost(model, { input, output }, custom);
 }
 
 export class HttpError extends Error {
@@ -171,7 +179,7 @@ export function anthropicAdapter(cfg: AdapterConfig): Adapter {
       const usage: Usage = {
         inputTokens: input + cacheRead + cacheWrite,
         outputTokens: output,
-        costUsd: usageCost(req.model, { input, output, cacheRead, cacheWrite }),
+        costUsd: usageCost(req.model, { input, output, cacheRead, cacheWrite }, cfg.prices),
         ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
         ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
       };
@@ -217,6 +225,11 @@ export function openAiCompatibleAdapter(cfg: AdapterConfig, opts: { free?: boole
       });
       if (!res.ok) throw new HttpError(res.status, await res.text());
       const calls = new Map<number, { id: string; name: string; args: string }>();
+      // Text that may turn out to be a tool call written as text (some local models do that) is held back until the end; any
+      // other text streams straight through.
+      const toolNames = (req.tools ?? []).map((t) => t.name);
+      let held = "";
+      let holding: boolean | undefined = toolNames.length ? undefined : false;
       let input = 0;
       let output = 0;
       let cached = 0;
@@ -229,7 +242,17 @@ export function openAiCompatibleAdapter(cfg: AdapterConfig, opts: { free?: boole
           cached = d.usage.prompt_tokens_details?.cached_tokens ?? cached; // a subset of prompt_tokens; the provider caches prefixes by itself
         }
         const delta = d.choices?.[0]?.delta;
-        if (delta?.content) yield { type: "text", delta: delta.content };
+        if (delta?.content) {
+          if (holding === false) yield { type: "text", delta: delta.content };
+          else {
+            held += delta.content;
+            holding = mayBeTextToolCall(held);
+            if (holding === false) {
+              yield { type: "text", delta: held };
+              held = "";
+            }
+          }
+        }
         for (const tc of delta?.tool_calls ?? []) {
           const cur = calls.get(tc.index) ?? { id: "", name: "", args: "" };
           if (tc.id) cur.id = tc.id;
@@ -238,10 +261,15 @@ export function openAiCompatibleAdapter(cfg: AdapterConfig, opts: { free?: boole
           calls.set(tc.index, cur);
         }
       }
+      if (held) {
+        const recovered = calls.size === 0 ? recoverToolCalls(held, toolNames) : null;
+        if (recovered) for (const call of recovered) yield { type: "tool_call", call };
+        else yield { type: "text", delta: held };
+      }
       for (const [, c] of [...calls.entries()].sort((a, b) => a[0] - b[0])) {
         yield { type: "tool_call", call: { id: c.id || `call_${c.name}`, name: c.name, args: safeJson(c.args) } };
       }
-      yield { type: "done", usage: { inputTokens: input, outputTokens: output, costUsd: opts.free ? 0 : costFor(req.model, input, output), ...(cached > 0 ? { cacheReadTokens: cached } : {}) } };
+      yield { type: "done", usage: { inputTokens: input, outputTokens: output, costUsd: opts.free ? 0 : costFor(req.model, input, output, cfg.prices), ...(cached > 0 ? { cacheReadTokens: cached } : {}) } };
     },
   };
 }

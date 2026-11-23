@@ -120,12 +120,18 @@ describe("plan mode and triage", () => {
   it("with model triage, asks the scout first and follows its answer", async () => {
     for (const [answer, expected] of [["trivial", "scout/scout-model"], ["complex", "architect/architect-model"], ["standard", "default/builder-model"]] as const) {
       const gw = new ScriptedGateway([text(answer), text("the real answer")]);
-      await drain(make(gw, { routing: { ...cfg, triage: "model" } }).run({ mode: "agent", prompt: "Add a --verbose flag to the CLI" }));
+      await drain(make(gw, { routing: { ...cfg, triage: "model", scoutEdits: true } }).run({ mode: "agent", prompt: "Add a --verbose flag to the CLI" }));
       expect(gw.requests[0]).toMatchObject({ provider: "scout", model: "scout-model" }); // the triage call itself
       expect(gw.requests[0]!.messages[0]!.content).toContain("Reply with exactly one word");
       expect(gw.requests[0]!.tools).toBeUndefined();
       expect(`${gw.requests[1]!.provider}/${gw.requests[1]!.model}`, answer).toBe(expected);
     }
+  });
+
+  it("keeps simple edits with the builder unless the scout is allowed to edit (a weak scout fumbles tool calls)", async () => {
+    const gw = new ScriptedGateway([text("trivial"), text("the real answer")]);
+    await drain(make(gw, { routing: { ...cfg, triage: "model" } }).run({ mode: "agent", prompt: "fix the typo in the README heading" }));
+    expect(used(gw)).toEqual(["scout/scout-model", "default/builder-model"]); // the scout sized it up; the builder does the editing
   });
 
   it("falls back to the heuristic when the scout rambles, fails, or there is no scout", async () => {

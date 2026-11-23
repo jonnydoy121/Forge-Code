@@ -1,6 +1,7 @@
 // Settings -> the routing config the agent loop uses, and the questions the UI asks about it (is anything remote? what changed?).
 import type { Route, RoutingConfig } from "@forge/agent-runtime";
-import type { AgentSettings } from "./settings";
+import { parsePrices, priceOf } from "@forge/model-gateway";
+import { sendsCodeOffMachine, type AgentSettings } from "./settings";
 
 export type TierName = "scout" | "architect";
 export type ProviderKind = AgentSettings["provider"];
@@ -42,8 +43,24 @@ export function routingFromSettings(s: AgentSettings): RoutingConfig | undefined
     ...(architect ? { architect: route("architect", architect) } : {}),
     escalateAfter: Math.max(1, Math.round(s.escalateAfter) || 2),
     triage: s.triage,
+    ...(s.scoutEdits ? { scoutEdits: true } : {}),
     ...(disabled.length ? { disabled } : {}),
   };
+}
+
+/**
+ * Models that would be billed (they run on a remote server) but have no known price, so the cost meter and the Max $ limit cannot
+ * count them. A price in the built-in table or one the user typed fixes it. Local models are free, so they are never listed.
+ */
+export function unpricedRemoteModels(s: AgentSettings): string[] {
+  const custom = parsePrices(s.customPrices).prices;
+  const used: { model: string; remote: boolean }[] = [{ model: s.model, remote: sendsCodeOffMachine(s) }];
+  const off = disabledTiers(s);
+  for (const t of ["scout", "architect"] as const) {
+    const cfg = tierSetting(s, t);
+    if (cfg && !off.includes(t)) used.push({ model: cfg.model, remote: tierIsRemote(s, t) });
+  }
+  return [...new Set(used.filter((u) => u.remote && u.model.trim() && !priceOf(u.model, custom)).map((u) => u.model))];
 }
 
 /** True when any tier that could be used sends prompts off this machine (the privacy badge must count them, not just the main model). */

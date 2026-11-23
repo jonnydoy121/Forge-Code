@@ -30,6 +30,8 @@ test("the architect takes over after two failed checks, plan mode uses it, a mod
     { content: "the plan" }, // 5: plan mode
     { content: "builder two answering" }, // 6: after the model change
     { content: "scout answering" }, // 7: a short question, with triage on
+    { content: "builder did the edit" }, // 8: a simple edit, scout edits off
+    { content: "scout did the edit" }, // 9: the same, once the scout may edit
   ];
   const models: string[] = [];
   const sent: string[][] = []; // the roles of the messages in each request: how much of the conversation the model was given
@@ -55,6 +57,8 @@ test("the architect takes over after two failed checks, plan mode uses it, a mod
       await mode.selectOption(m);
       await input.fill(prompt);
       await input.press("Enter");
+      // After a long conversation the panel may ask whether this is a new task; answer "Continue here" so the message is sent.
+      await page.getByRole("button", { name: "Continue here" }).click({ timeout: 1500 }).catch(() => {});
     };
     const settings = async (fn: () => Promise<void>) => {
       await page.getByTestId("settings-toggle").click();
@@ -105,7 +109,18 @@ test("the architect takes over after two failed checks, plan mode uses it, a mod
     await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("scout answering", { timeout: 60_000 });
     expect(models.at(-1)).toBe("scout-model");
     expect(sent.at(-1)!.length).toBeGreaterThan(sent[5]!.length); // still the same conversation after another settings change
-    expect(models).toHaveLength(7);
+
+    // 5. A simple EDIT stays with the builder until the scout is allowed to edit (a weak scout fumbles tool calls).
+    await send("agent", "fix the typo in the README heading");
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("builder did the edit", { timeout: 60_000 });
+    expect(models.at(-1)).toBe("builder-two");
+    await settings(async () => {
+      await page.getByTestId("scout-edits").check();
+    });
+    await send("agent", "fix the typo in the README heading");
+    await expect(page.locator('[data-testid="assistant"]:visible').last()).toContainText("scout did the edit", { timeout: 60_000 });
+    expect(models.at(-1)).toBe("scout-model");
+    expect(models).toHaveLength(9);
   } finally {
     srv.close();
   }

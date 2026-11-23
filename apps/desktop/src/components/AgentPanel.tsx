@@ -14,7 +14,9 @@ import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
 import { prewarmRuntime } from "../lib/runtimeProcess";
 import { DEFAULT_MODELS, loadSettings, saveSettings, sendsCodeOffMachine, type AgentSettings } from "../lib/settings";
-import { tierIsRemote, tierSetting, tiersSendOffMachine, type TierName } from "../lib/modelRouting";
+import { parsePrices } from "@forge/model-gateway";
+import { cleanCommitMessage } from "../lib/commitMessage";
+import { tierIsRemote, tierSetting, tiersSendOffMachine, unpricedRemoteModels, type TierName } from "../lib/modelRouting";
 import { completeOnce } from "../lib/agentSession";
 import type { WorkspaceServices } from "../lib/workspace";
 import { Timeline } from "./Timeline";
@@ -480,6 +482,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   }, [registerSend, active]);
 
   const offMachine = sendsCodeOffMachine(settings) || tiersSendOffMachine(settings);
+  const unpriced = unpricedRemoteModels(settings);
+  const priceErrors = parsePrices(settings.customPrices).errors;
   const category = (id: string) => (id === "system" || id === "mode" ? "System prompt" : id === "rules" ? "Rules" : id === "memories" ? "Memories" : id === "plan" ? "Plan" : id === "repo-map" ? "Repo map" : id === "conversation" ? "Conversation" : "Attachments");
   const byCategory = new Map<string, number>();
   for (const e of meter?.entries ?? []) byCategory.set(category(e.id), (byCategory.get(category(e.id)) ?? 0) + e.tokens);
@@ -545,6 +549,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               <option value="model">Ask the scout first (one extra call)</option>
             </select>
           </Row>
+          <Check testId="scout-edits" checked={settings.scoutEdits} onChange={(v) => update({ scoutEdits: v })}>Let the scout make small edits too, not only answer questions (only for a model that is good at tool calls: a 1.5B model passed 4 of 18 small edits, a 7B model 13 of 18)</Check>
           {settings.localOnly && (tierIsRemote(settings, "scout") || tierIsRemote(settings, "architect")) && <p className="text-amber-400" data-testid="routing-local-only-note">Local-only mode is on, so a remote scout or architect is skipped and the main model is used.</p>}
 
           <SettingsHeading>Edits and limits</SettingsHeading>
@@ -559,6 +564,12 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
           <Row label="Max minutes"><input type="number" className="w-16 rounded bg-[var(--hover)] px-1 py-0.5" value={Math.round(settings.maxSeconds / 60)} onChange={(e) => update({ maxSeconds: (Number(e.target.value) || 30) * 60 })} /><span className="text-[var(--muted)]">per run</span></Row>
           <Row label="Context"><input type="number" data-testid="budget-tokens" className="w-24 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.budgetTokens} onChange={(e) => update({ budgetTokens: Number(e.target.value) || 100000 })} /><span className="text-[var(--muted)]">tokens</span></Row>
           <Row label="Compact at"><input type="number" step="0.05" min="0.3" max="0.95" className="w-24 rounded bg-[var(--hover)] px-1 py-0.5" value={settings.compactionThreshold} onChange={(e) => update({ compactionThreshold: Number(e.target.value) || 0.8 })} /><span className="text-[var(--muted)]">of the budget</span></Row>
+
+          <label className="block">Model prices <span className="text-[var(--muted)]">(one per line: model, input $ and output $ per million tokens; the Max $ limit counts only models with a price)</span>
+            <textarea data-testid="custom-prices" className="mt-1 h-14 w-full rounded bg-[var(--hover)] p-1 font-mono" placeholder="gpt-4o 2.5 10" value={settings.customPrices} onChange={(e) => update({ customPrices: e.target.value })} />
+          </label>
+          {priceErrors.map((e) => <p key={e.line} className="text-red-400" data-testid="price-error">Prices, line {e.line}: {e.message}</p>)}
+          {unpriced.length > 0 && <p className="text-amber-400" data-testid="unpriced-warning">No price known for {unpriced.join(", ")}: it runs on a remote server, but the cost meter and the Max $ limit cannot count it. Add a price above.</p>}
 
           <SettingsHeading>Privacy and safety</SettingsHeading>
           <Check testId="local-only" checked={settings.localOnly} onChange={(v) => update({ localOnly: v })}>Local-only mode: block every request that would leave this machine</Check>
@@ -598,9 +609,9 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
             }}
             draftCommitMessage={async (diff) => {
               try {
-                return await completeOnce(settings, services, `Write a concise git commit message (imperative mood, max 72 char subject, optional short body) for this change. Reply with the message only.
+                return cleanCommitMessage(await completeOnce(settings, services, `Write a concise git commit message (imperative mood, max 72 char subject, optional short body) for this change. Reply with the message only.
 
-${diff}`, { tier: "scout" });
+${diff}`, { tier: "scout" }));
               } catch {
                 return null;
               }
@@ -773,6 +784,7 @@ ${diff}`, { tier: "scout" });
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)] [&>*]:whitespace-nowrap">
           <span data-testid="token-meter" title={breakdown}>{meter ? `${meter.total.toLocaleString()} tokens${meter.calibrated ? "" : " (est.)"}` : "0 tokens"}</span>
           <span data-testid="cost">${cost.toFixed(4)}</span>
+          {unpriced.length > 0 && <span className="text-amber-400" data-testid="unpriced" title={`No price known for ${unpriced.join(", ")}: its cost is not counted (Settings > Model prices)`}>cost not counted</span>}
           {runtimeKind && <span data-testid="runtime-kind" title="Where the agent loop runs">agent: {runtimeKind}</span>}
           {services && (
             <span className="ml-auto flex items-center gap-1">

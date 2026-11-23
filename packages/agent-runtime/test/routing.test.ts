@@ -46,6 +46,21 @@ describe("pickTier", () => {
     expect(pick({ scout: cfg.scout }, "agent", 0, "complex").tier).toBe("builder");
   });
 
+  it("lets the scout take simple edits only when that is switched on, and questions always", () => {
+    expect(pick(cfg, "agent", 0, "trivial").tier).toBe("builder");
+    expect(pick(cfg, "debug", 0, "trivial").tier).toBe("builder");
+    expect(pick({ ...cfg, scoutEdits: true }, "agent", 0, "trivial").tier).toBe("scout");
+    expect(pick({ ...cfg, scoutEdits: true }, "debug", 0, "trivial").tier).toBe("scout");
+    expect(pick(cfg, "ask", 0, "trivial").tier).toBe("scout");
+  });
+
+  it("gives the scout a single attempt: after one failed check the builder takes over, and the architect after two", () => {
+    const on = { ...cfg, scoutEdits: true };
+    expect(pick(on, "agent", 0, "trivial").tier).toBe("scout");
+    expect(pick(on, "agent", 1, "trivial").tier).toBe("builder");
+    expect(pick(on, "agent", 2, "trivial").tier).toBe("architect");
+  });
+
   it("never uses a tier that is disabled (local-only mode blocks the remote ones) and falls back to the builder", () => {
     const off: RoutingConfig = { ...cfg, disabled: ["architect"] };
     expect(pick(off, "plan").tier).toBe("builder");

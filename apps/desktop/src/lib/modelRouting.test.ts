@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type AgentSettings } from "./settings";
-import { disabledTiers, routingFromSettings, tierIsRemote, tierSetting, tiersSendOffMachine } from "./modelRouting";
+import { disabledTiers, routingFromSettings, tierIsRemote, tierSetting, tiersSendOffMachine, unpricedRemoteModels } from "./modelRouting";
 
 const s = (over: Partial<AgentSettings> = {}): AgentSettings => ({ ...DEFAULT_SETTINGS, ...over });
 const tiered = (over: Partial<AgentSettings> = {}) => s({ scoutProvider: "ollama", scoutModel: "qwen2.5-coder:7b", architectProvider: "anthropic", architectModel: "claude-opus-5-5", ...over });
@@ -26,6 +26,8 @@ describe("routingFromSettings", () => {
   it("carries triage and a sane escalation threshold even with no tiers (triage alone is a valid configuration)", () => {
     expect(routingFromSettings(s({ triage: "heuristic" }))).toMatchObject({ triage: "heuristic", escalateAfter: 2 });
     expect(routingFromSettings(tiered({ escalateAfter: 3 }))!.escalateAfter).toBe(3);
+    expect(routingFromSettings(tiered())!.scoutEdits).toBeUndefined(); // off unless asked for
+    expect(routingFromSettings(tiered({ scoutEdits: true }))!.scoutEdits).toBe(true);
     expect(routingFromSettings(tiered({ escalateAfter: 0 }))!.escalateAfter).toBe(2);
     expect(routingFromSettings(tiered({ escalateAfter: -4 }))!.escalateAfter).toBe(1);
   });
@@ -56,5 +58,31 @@ describe("tiersSendOffMachine (the privacy badge)", () => {
   });
   it("ignores a remote tier that local-only mode has disabled, because it will never be called", () => {
     expect(tiersSendOffMachine(tiered({ localOnly: true }))).toBe(false);
+  });
+});
+
+describe("unpricedRemoteModels (what the Max $ limit cannot see)", () => {
+  it("is empty for local models, whatever they are called", () => {
+    expect(unpricedRemoteModels(s())).toEqual([]);
+    expect(unpricedRemoteModels(s({ model: "anything-at-all" }))).toEqual([]);
+    expect(unpricedRemoteModels(s({ provider: "openai", baseUrl: "http://127.0.0.1:1234/v1", model: "lmstudio-model" }))).toEqual([]);
+  });
+
+  it("lists a remote model with no price, and not one the built-in table knows", () => {
+    expect(unpricedRemoteModels(s({ provider: "openai", model: "gpt-4o" }))).toEqual(["gpt-4o"]);
+    expect(unpricedRemoteModels(s({ provider: "anthropic", model: "claude-sonnet-5-5" }))).toEqual([]);
+    expect(unpricedRemoteModels(s({ provider: "anthropic", model: "claude-opus-5-5" }))).toEqual([]);
+  });
+
+  it("stops listing a model once the user gives it a price, and ignores unusable price lines", () => {
+    expect(unpricedRemoteModels(s({ provider: "openai", model: "gpt-4o", customPrices: "gpt-4o 2.5 10" }))).toEqual([]);
+    expect(unpricedRemoteModels(s({ provider: "openai", model: "gpt-4o", customPrices: "gpt-4o lots lots" }))).toEqual(["gpt-4o"]);
+  });
+
+  it("includes the tiers that could be used, once each, and skips ones local-only mode disables", () => {
+    const t = tiered({ architectModel: "some-new-model", scoutProvider: "openai", scoutModel: "some-new-model" });
+    expect(unpricedRemoteModels(t)).toEqual(["some-new-model"]); // the same model in two roles is one entry
+    expect(unpricedRemoteModels(tiered({ architectModel: "some-new-model", localOnly: true }))).toEqual([]); // the remote tier will never be called
+    expect(unpricedRemoteModels(tiered())).toEqual([]); // opus is priced, the local scout is free
   });
 });

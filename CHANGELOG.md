@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Local models can now use tools; prices you can set; scout safety
+- **Fixed: agent mode with the default local model could not edit anything.** `qwen2.5-coder` (7B and 1.5B) through Ollama picks the right tool and arguments but writes the call as JSON *text* rather than the structured `tool_calls` field, so the loop took it for an answer and ran nothing. Measured on this machine with a new opt-in test (`scout.live.test.ts`, `FORGE_LIVE_SCOUT=<model>`): 0 of 18 small tasks passed with zero tool calls for each model; after the fix the 7B passes 13 of 18 and the 1.5B 4 of 18. A reply is read back as tool calls only when the whole of it is calls to tools that were offered (prose with JSON in it, a made-up tool, or a cut-off call stays an answer); ordinary text still streams as it arrives. Details and the triage and commit-message measurements: `docs/MODEL-ROUTING.md`.
+- **Prices you can set.** The Max $ limit and the cost meter now use prices you type for models the built-in table lacks (Settings > Model prices, one line per model). A remote model with no price is flagged in settings and beside the cost in the panel; models on this machine stay free.
+- **Scout safety.** A request sent to the scout gets one attempt: after a failed check the builder takes over (then the architect). The scout takes simple edits only if you tick "Let the scout make small edits too"; questions and chores are always allowed.
+- **Commit messages** are cleaned of backticks, quotes, a "Commit message:" label and a leading `#` (a small model wrapped two of three in them; git reads a leading `#` as a comment).
+- Tests: tool-call recovery (9 parser + 8 streaming), prices (8), scout rails and the new settings, commit message cleanup (5), and `prices.spec.ts` and extended `routing.spec.ts` in the real window.
+
 ### Model routing: scout, builder, architect
 - Use more than one model in a session: a cheap fast **scout** for chores, the main model as the **builder**, and a strong **architect** for plan mode and for fixes after the checks fail twice. Set it under Settings > Model routing; with nothing set everything goes to the main model as before. A tier left off falls back to the builder. Full description, what was and was not built from the proposal, and the limits: `docs/MODEL-ROUTING.md`.
 - **Escalation**: the builder gets one attempt to fix what the checks found; on the second failure the architect takes over for the rest of the run, and the next message starts on the builder again. The panel shows the model change and its reason; the audit log records the model that actually answered each request.

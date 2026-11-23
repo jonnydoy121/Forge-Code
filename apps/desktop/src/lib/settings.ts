@@ -51,6 +51,10 @@ export interface AgentSettings {
   escalateAfter: number;
   /** how to size up a request: off, by its wording (free), or by asking the scout model first */
   triage: "off" | "heuristic" | "model";
+  /** let the scout take simple requests that need edits, not just questions (needs a model that is good at tool calls) */
+  scoutEdits: boolean;
+  /** prices for models the built-in table lacks, one per line: `model input-$ output-$` per million tokens */
+  customPrices: string;
 }
 
 export const DEFAULT_MODELS: Record<AgentSettings["provider"], string> = {
@@ -90,6 +94,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   architectApiKey: "",
   escalateAfter: 2,
   triage: "off",
+  scoutEdits: false,
+  customPrices: "",
 };
 
 const KEY = "forge.settings.v1";

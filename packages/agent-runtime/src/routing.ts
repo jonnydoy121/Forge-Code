@@ -27,6 +27,12 @@ export interface RoutingConfig {
    * short timeout; the heuristic answers if it fails).
    */
   triage?: "off" | "heuristic" | "model";
+  /**
+   * Let the scout take simple requests that need EDITS (Agent and Debug mode), not just questions. Off by default: small local
+   * models often write a tool call wrongly or not at all, and a request the scout fumbles may leave nothing to check. The scout
+   * always gets a single attempt: once a check has failed, the builder takes the request over.
+   */
+  scoutEdits?: boolean;
   /** Tiers that must not be used (local-only mode blocks the ones that are remote). They fall back to the builder. */
   disabled?: Tier[];
 }
@@ -61,7 +67,8 @@ export function pickTier(cfg: RoutingConfig | undefined, builder: Route, s: { mo
   }
   if (s.mode === "plan" && (cfg.planWithArchitect ?? true) && architect) return { tier: "architect", route: architect, reason: "plan mode" };
   if (s.complexity === "complex" && architect) return { tier: "architect", route: architect, reason: "the request looks complex" };
-  if (s.complexity === "trivial" && scout && s.mode !== "plan") return { tier: "scout", route: scout, reason: "the request looks simple" };
+  // The scout gets one attempt (no failed check yet), and edits only when allowed.
+  if (s.complexity === "trivial" && scout && s.failedChecks === 0 && s.mode !== "plan" && (s.mode === "ask" || cfg.scoutEdits)) return { tier: "scout", route: scout, reason: "the request looks simple" };
   return base;
 }
 
