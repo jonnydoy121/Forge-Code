@@ -26,13 +26,14 @@ test("capture the main screens", async () => {
   writeFileSync(`${dir}/README.md`, "# Demo\n\nA small project.\n");
 
   let turn = 0;
+  let danger = 0;
   const srv = createServer(async (req: IncomingMessage, res) => {
     let body = "";
     for await (const c of req) body += c;
     const tools = (body.match(/"role":"tool"/g) ?? []).length;
     res.writeHead(200, { "content-type": "text/event-stream" });
     const call = (name: string, args: unknown) => ({ tool_calls: [{ index: 0, id: `c${++turn}`, function: { name, arguments: JSON.stringify(args) } }] });
-    const delta = tools === 0 ? call("read_file", { path: "src/math.ts" }) : tools === 1 ? call("edit_file", { path: "src/math.ts", old_string: "return a - b; // bug", new_string: "return a + b;", reason: "add should add, not subtract" }) : { content: "I fixed `add` in `src/math.ts`: it subtracted instead of adding. The change is waiting for your review." };
+    const delta = danger === 1 ? (danger = 2, call("run_command", { command: "rm -rf ./build" })) : tools === 0 ? call("read_file", { path: "src/math.ts" }) : tools === 1 ? call("edit_file", { path: "src/math.ts", old_string: "return a - b; // bug", new_string: "return a + b;", reason: "add should add, not subtract" }) : { content: "I fixed `add` in `src/math.ts`: it subtracted instead of adding. The change is waiting for your review." };
     res.write(sse({ choices: [{ delta }] }));
     res.write(sse({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 80 } }));
     res.end("data: [DONE]\n\n");
@@ -102,6 +103,27 @@ test("capture the main screens", async () => {
     await page.waitForTimeout(1500);
     await shot("15-light-terminal");
     await page.keyboard.press("Control+`");
+
+    // Tabs (one open file edited, so a dirty marker shows), the permission prompt and the welcome dialog, in light.
+    await page.getByTestId("tree-index.ts").click();
+    await page.getByRole("tab", { name: /math\.ts/ }).click().catch(() => page.getByText("math.ts", { exact: true }).first().click());
+    await page.locator(".monaco-editor .view-lines").click();
+    await page.keyboard.type("// edited");
+    await shot("16-light-tabs");
+
+    danger = 1;
+    await page.locator('[data-testid="agent-input"]:visible').fill("clean the build folder");
+    await page.locator('[data-testid="agent-input"]:visible').press("Enter");
+    await expect(page.getByTestId("permission-prompt")).toBeVisible({ timeout: 30_000 });
+    await shot("17-light-permission");
+    await page.getByTestId("deny").click();
+
+    await page.keyboard.press("Control+Shift+P");
+    await page.keyboard.type("welcome");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("welcome-skip")).toBeVisible();
+    await shot("18-light-welcome");
+    await page.getByTestId("welcome-skip").click();
 
     await page.getByTestId("thread-new").click();
     await shot("08-second-thread");
