@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { CLAUDE_AGENT } from "../lib/claudePlan";
 import { latestOnly } from "../lib/latestOnly";
 import { RuleEngine, matchSkills, type AgentDef, type AppliedRule, type DocSet, type LintWarning, type Memory, type Skill } from "@forge/context-store";
-import { loadSettings, saveSettings } from "../lib/settings";
-import type { WorkspaceServices } from "../lib/workspace";
+import { loadSettings, presetFor, saveSettings } from "../lib/settings";
+import { BRIDGES, bridgeCommand, describeJobs, removeJob, saveJob, setEnabled, type EditResult, type RawJob } from "../lib/scheduleEdit";
+import { diskFs, type WorkspaceServices } from "../lib/workspace";
 
 interface Props {
   services: WorkspaceServices;
@@ -14,7 +15,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "rules" | "memory" | "skills" | "agents" | "docs" | "connections";
+type Tab = "rules" | "memory" | "skills" | "agents" | "schedule" | "docs" | "connections";
 
 export function ContextPane({ services, version, activeFile, onOpenFile, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("rules");
@@ -23,9 +24,9 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
       <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-sm">
         <strong>Context</strong>
         <div className="flex gap-3" role="tablist" aria-label="Context sections">
-          {(["rules", "memory", "skills", "agents", "docs", "connections"] as Tab[]).map((t) => (
+          {(["rules", "memory", "skills", "agents", "schedule", "docs", "connections"] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} data-testid={`ctx-tab-${t}`} className={tab === t ? "underline" : "text-[var(--muted)]"} onClick={() => setTab(t)}>
-              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "skills" ? "Skills" : t === "agents" ? "Agents" : t === "docs" ? "Docs" : "Connections"}
+              {t === "rules" ? "Rules" : t === "memory" ? "Memories" : t === "skills" ? "Skills" : t === "agents" ? "Agents" : t === "schedule" ? "Schedule" : t === "docs" ? "Docs" : "Connections"}
             </button>
           ))}
         </div>
@@ -36,6 +37,7 @@ export function ContextPane({ services, version, activeFile, onOpenFile, onClose
         {tab === "memory" && <MemoryTab services={services} version={version} />}
         {tab === "skills" && <SkillsTab services={services} version={version} onOpenFile={onOpenFile} />}
         {tab === "agents" && <AgentsTab services={services} version={version} />}
+        {tab === "schedule" && <ScheduleTab services={services} version={version} />}
         {tab === "docs" && <DocsTab services={services} version={version} />}
         {tab === "connections" && <ConnectionsTab services={services} />}
       </div>
@@ -97,6 +99,158 @@ function RulesTab({ services, version, activeFile, onOpenFile }: Omit<Props, "on
       </div>
       {msg && <div role="status" data-testid="rules-msg">{msg}</div>}
       <div className="text-xs text-[var(--muted)]">{RuleEngine.name} reads AGENTS.md, CLAUDE.md, .cursorrules, .cursor/rules, .windsurfrules, .github/copilot-instructions.md, nested AGENTS.md and .forge/rules/*.md.</div>
+    </div>
+  );
+}
+
+function ScheduleTab({ services, version }: { services: WorkspaceServices; version: number }) {
+  const path = `${services.root}/.forge/schedule.json`;
+  const [text, setText] = useState<string | null | undefined>(undefined);
+  const [form, setForm] = useState({ name: "", cron: "0 2 * * *", prompt: "", command: "ask", apply: false });
+  const [editing, setEditing] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [bridges, setBridges] = useState<string[]>([]);
+  const [shell, setShell] = useState<"powershell" | "bash">("powershell");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const load = latestOnly(setText);
+    load.runOr(diskFs.read(path), () => setText(null));
+    return load.cancel;
+  }, [path, version]);
+
+  const apply = async (r: EditResult): Promise<boolean> => {
+    if ("error" in r) {
+      setError(r.error);
+      return false;
+    }
+    setError(null);
+    const before = text;
+    setText(r.text); // show the change at once; put the old text back if it cannot be saved
+    try {
+      await diskFs.write(path, r.text);
+      return true;
+    } catch (e) {
+      setText(before);
+      setError(`Could not save: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  };
+  const view = text === undefined ? null : describeJobs(text, new Date());
+  const settings = loadSettings();
+  const bridgeProvider = settings.provider === "openai" && presetFor(settings.baseUrl) !== "custom" && presetFor(settings.baseUrl) !== "openai" ? presetFor(settings.baseUrl) : settings.provider;
+  const command = bridgeCommand(bridges, shell, bridgeProvider, settings.model);
+  const blank = { name: "", cron: "0 2 * * *", prompt: "", command: "ask", apply: false };
+
+  return (
+    <div className="space-y-4">
+      <section className="space-y-2" aria-label="Scheduled runs">
+        <h3 className="font-semibold">Scheduled runs</h3>
+        <p className="text-[var(--muted)]">
+          Jobs in <code>.forge/schedule.json</code> run the agent on a cron schedule. The app does not run them: call <code>forge-code schedule run-due</code> every minute from Task Scheduler or cron, or leave <code>forge-code schedule watch</code> running. A job that edits only proposes
+          changes (saved with its result) unless it is set to apply them.
+        </p>
+        {view?.error && <p className="text-amber-400" data-testid="sched-file-error">{view.error}</p>}
+        {view && view.views.length === 0 && !view.error && <p data-testid="sched-empty">No scheduled jobs yet.</p>}
+        <ul className="space-y-2" aria-label="Jobs">
+          {view?.views.map(({ job, enabled, problem, next }, i) => (
+            <li key={`${job.name}:${i}`} className="rounded border border-[var(--border)] p-2" data-testid="sched-job" data-job={job.name}>
+              <div className="flex items-center gap-2">
+                <strong>{String(job.name)}</strong>
+                <code className="rounded bg-[var(--hover)] px-1 text-xs">{String(job.cron)}</code>
+                <span className="rounded bg-[var(--hover)] px-1 text-xs">{job.command === "run" ? (job.apply ? "run, applies changes" : "run, proposes") : "ask"}</span>
+                <label className="ml-auto flex items-center gap-1 text-xs">
+                  <input type="checkbox" data-testid="sched-enabled" checked={enabled} onChange={(e) => void apply(setEnabled(text ?? null, String(job.name), e.target.checked))} />
+                  Enabled
+                </label>
+                <button
+                  className="underline"
+                  data-testid="sched-edit"
+                  onClick={() => {
+                    setEditing(String(job.name));
+                    setForm({ name: String(job.name), cron: String(job.cron), prompt: String(job.prompt ?? ""), command: job.command === "run" ? "run" : "ask", apply: job.apply === true });
+                    setError(null);
+                  }}
+                >
+                  Edit
+                </button>
+                <button className="underline" data-testid="sched-remove" onClick={() => void apply(removeJob(text ?? null, String(job.name)))}>Remove</button>
+              </div>
+              <div className="text-[var(--muted)]">{String(job.prompt ?? "")}</div>
+              {problem ? (
+                <div className="text-xs text-amber-400" data-testid="sched-problem">Not usable: {problem}</div>
+              ) : (
+                <div className="text-xs text-[var(--muted)]" data-testid="sched-next">{enabled ? (next ? `Next run: ${next.toLocaleString()}` : "Never runs") : "Disabled"}</div>
+              )}
+            </li>
+          ))}
+        </ul>
+        <form
+          className="space-y-1 rounded border border-[var(--border)] p-2"
+          aria-label={editing ? `Edit ${editing}` : "Add a job"}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const job: RawJob = { name: form.name.trim(), cron: form.cron.trim(), prompt: form.prompt.trim(), command: form.command, ...(form.command === "run" && form.apply ? { apply: true } : {}) };
+            void apply(saveJob(text ?? null, job, editing)).then((ok) => {
+              if (ok) {
+                setEditing(undefined);
+                setForm(blank);
+              }
+            });
+          }}
+        >
+          <div className="font-medium">{editing ? `Edit "${editing}"` : "Add a job"}</div>
+          <div className="flex flex-wrap gap-2">
+            <input data-testid="sched-name" aria-label="Job name" placeholder="name" className="rounded bg-[var(--hover)] px-2 py-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input data-testid="sched-cron" aria-label="Cron expression" placeholder="0 2 * * *" className="rounded bg-[var(--hover)] px-2 py-1 font-mono" value={form.cron} onChange={(e) => setForm({ ...form, cron: e.target.value })} />
+            <select data-testid="sched-command" aria-label="Kind of job" className="rounded bg-[var(--hover)] px-1" value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value, apply: e.target.value === "run" ? form.apply : false })}>
+              <option value="ask">ask (answers a question)</option>
+              <option value="run">run (proposes changes)</option>
+            </select>
+            {form.command === "run" && (
+              <label className="flex items-center gap-1">
+                <input type="checkbox" data-testid="sched-apply" checked={form.apply} onChange={(e) => setForm({ ...form, apply: e.target.checked })} />
+                Apply changes without asking
+              </label>
+            )}
+          </div>
+          <textarea data-testid="sched-prompt" aria-label="What the job asks the agent" placeholder="What should the agent do?" className="block w-full rounded bg-[var(--hover)] px-2 py-1" rows={2} value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
+          {error && <div className="text-amber-400" data-testid="sched-error" role="alert">{error}</div>}
+          <div className="flex gap-2">
+            <button type="submit" data-testid="sched-save" className="rounded bg-[var(--hover)] px-2 py-0.5">{editing ? "Save changes" : "Add job"}</button>
+            {editing && (
+              <button type="button" className="underline" onClick={() => { setEditing(undefined); setError(null); setForm(blank); }}>Cancel</button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      <section className="space-y-2" aria-label="Chat bridges">
+        <h3 className="font-semibold">Chat bridges (Slack, Discord, Linear, Telegram)</h3>
+        <p className="text-[var(--muted)]">
+          <code>forge-code serve</code> answers read-only questions from chat; it cannot edit files or run commands. It runs outside the app and listens on this computer only, so Slack, Discord and Linear need a tunnel you set up. Choose what to connect and copy the setup. The values are
+          placeholders: this screen never holds a secret. These bridges are tested against mocks only, not against the live services.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          {BRIDGES.map((b) => (
+            <label key={b.id} className="flex items-center gap-1" title={b.note}>
+              <input type="checkbox" data-testid={`bridge-${b.id}`} checked={bridges.includes(b.id)} onChange={(e) => setBridges(e.target.checked ? [...bridges, b.id] : bridges.filter((x) => x !== b.id))} />
+              {b.label}
+            </label>
+          ))}
+          <select data-testid="bridge-shell" aria-label="Shell" className="rounded bg-[var(--hover)] px-1" value={shell} onChange={(e) => setShell(e.target.value as "powershell" | "bash")}>
+            <option value="powershell">PowerShell</option>
+            <option value="bash">bash</option>
+          </select>
+        </div>
+        <ul className="text-xs text-[var(--muted)]">
+          {BRIDGES.filter((b) => bridges.includes(b.id)).map((b) => (
+            <li key={b.id}>{b.label}: {b.note}</li>
+          ))}
+        </ul>
+        <pre data-testid="bridge-command" className="overflow-auto rounded bg-[var(--hover)] p-2 text-xs">{command}</pre>
+        <button className="underline" data-testid="bridge-copy" onClick={() => void navigator.clipboard.writeText(command).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
+      </section>
     </div>
   );
 }

@@ -4,6 +4,8 @@
 `forge-code ask "question"` answers; `forge-code run "task"` proposes diffs (add `--apply` to write, `--allow "npm test"` to permit commands, `--max-cost`, `--max-steps`, `--json`). Exit codes: 0 done, 1 error, 2 stopped at a limit. Model settings come from `FORGE_PROVIDER`, `FORGE_BASE_URL`, `FORGE_MODEL`, `FORGE_API_KEY`.
 
 ## Schedules
+The Schedule tab (Context pane, `Ctrl+Shift+K`) edits `.forge/schedule.json` for you: add, edit, switch off and remove jobs, with each job's next run. It does not run them; the commands below do.
+
 `.forge/schedule.json` lists jobs (`name`, `cron`, `prompt`, `command` ask|run, `apply`, `allow`, `maxCost`, `maxSteps`, `model`, `provider`, `baseUrl`, `enabled`). A `run` job only proposes unless `"apply": true`.
 
     forge-code schedule list | run-due [--at T] [--window N] | run <name> | watch

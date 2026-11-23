@@ -15,6 +15,8 @@
 | Multi-agent teams | Built, read-only specialists | `.forge/agents/*.md` define specialists (instructions, tools, model tier) that the coordinator calls with `delegate`, in the app and the CLI (the CLI has no model tiers, so `tier` is ignored there). Specialists only get read tools, by design. |
 | Cron schedules | Built | `forge-code schedule` (list, run-due, run, watch), cron parsing tested including clock changes. Needs something to call it (cron, Task Scheduler, CI) or `watch`. |
 
+Settings: Test connection and a model list for OpenAI-compatible endpoints (Strata, Gemini and the others), a Schedule tab for the cron jobs, copy-ready bridge setup, and auto-skill controls. The Schedule tab edits the file but does not run jobs.
+
 Skills are applied automatically when a request clearly matches them; see [AUTO-SKILLS.md](AUTO-SKILLS.md) for the research, measurements and limits (one small local model, not hosted models). Personas are not switched automatically.
 
 Other unverified items: real Anthropic prompt-cache savings (one-command check provided, never run), hosted-provider behaviour, Unity/Blender integrations.

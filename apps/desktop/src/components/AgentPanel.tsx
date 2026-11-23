@@ -10,6 +10,8 @@ import { RuleEngine, detectCorrection, renderMemories, selectMemories, suggestNe
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { fetchText } from "../lib/http";
 import { loadApiKey, migrateLegacyKey, storeApiKey } from "../lib/secrets";
+import { checkEndpoint, type EndpointCheck } from "../lib/endpoint";
+import { pickFetch } from "../lib/http";
 import { mark } from "../lib/trace";
 import { Markdown } from "./Markdown";
 import { prewarmRuntime } from "../lib/runtimeProcess";
@@ -173,6 +175,8 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   // Claude Code signed in with the developer's own Claude account: offered as an agent, no API key needed.
   // Starts from the last answer (kept ten minutes), so the mode list is right from the first paint instead of changing a moment later.
   const [claudePlan, setClaudePlan] = useState<ClaudePlan | null>(() => readCachedPlan(typeof localStorage === "undefined" ? null : localStorage));
+  const [endpoint, setEndpoint] = useState<EndpointCheck | null>(null);
+  const [endpointBusy, setEndpointBusy] = useState(false);
   const [claudeCheck, setClaudeCheck] = useState(0);
   const [showTimeline, setShowTimeline] = useState(false);
   const [suggest, setSuggest] = useState<string | null>(null);
@@ -641,9 +645,34 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
               </select>
             </Row>
           )}
-          <Row label="Model"><input data-testid="main-model" className={FIELD} value={settings.model} onChange={(e) => update({ model: e.target.value })} /></Row>
+          <Row label="Model"><input data-testid="main-model" list={settings.provider === "openai" ? "endpoint-models" : undefined} className={FIELD} value={settings.model} onChange={(e) => update({ model: e.target.value })} /></Row>
           <Row label="Base URL"><input data-testid="base-url" className={FIELD} placeholder="default" value={settings.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} /></Row>
           <Row label="API key"><input type="password" className={FIELD} value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /></Row>
+          {settings.provider === "openai" && (
+            <Row label="Connection">
+              <div className="space-y-1">
+                <button
+                  data-testid="endpoint-test"
+                  className="rounded bg-[var(--hover)] px-2 py-0.5"
+                  disabled={endpointBusy}
+                  onClick={async () => {
+                    setEndpointBusy(true);
+                    setEndpoint(null);
+                    setEndpoint(await checkEndpoint(await pickFetch(), settings.baseUrl, settings.apiKey));
+                    setEndpointBusy(false);
+                  }}
+                >
+                  {endpointBusy ? "Testing…" : "Test connection"}
+                </button>
+                {endpoint && (
+                  <div data-testid="endpoint-result" data-ok={endpoint.ok} className={endpoint.ok ? "text-green-400" : "text-amber-400"}>
+                    {endpoint.message}
+                  </div>
+                )}
+                <datalist id="endpoint-models">{(endpoint?.models ?? []).map((m) => <option key={m} value={m} />)}</datalist>
+              </div>
+            </Row>
+          )}
           <p className="text-[var(--muted)]">The API key is stored in your OS credential store, not in a file or local storage.{settings.provider === "openai" ? " One key is kept for all OpenAI-compatible endpoints, so choosing another endpoint clears it: paste the key for that service." : ""}</p>
 
           <SettingsHeading>Claude plan (no API key)</SettingsHeading>

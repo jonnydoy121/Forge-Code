@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+### Settings: Strata connection, schedules and bridges, auto-skill controls
+- **Test connection** (Settings, OpenAI-compatible): asks the endpoint's `/models` with the typed key, shows what the server says (a 401 comes back as "Invalid API key... check the API key") and offers the listed models for the Model field. Works for Strata and any OpenAI-compatible server. Checked against a mock that enforces a key (real window) and against Strata's real `/models` response shape.
+- **Context > Schedule tab**: add, edit, enable/disable and remove jobs in `.forge/schedule.json`, with each job's next run and what is wrong with a broken one. Changes are checked with the command line's own parser before anything is written; fields the screen does not show survive an edit; a file that is not valid JSON is reported and never overwritten. The app does not run the jobs (call `forge-code schedule run-due` from Task Scheduler or cron).
+- **Chat bridge setup** (same tab): choose Slack, Discord, Linear or Telegram and copy the exact `forge-code serve` setup for PowerShell or bash. Placeholders only; the screen never holds a secret. The bridges are still mock-tested only.
+- **Auto-skill controls**: sensitivity (strict, balanced, loose), most skills at once (1 to 3), a switch on every skill, and a "try a request" preview in Context > Skills. Measured on the 36 labelled requests: strict 100% precision / 86% recall, balanced 95% / 91%, loose 87% / 91% (3 wrong matches). My first thresholds were arbitrary (a threshold of 3 never decided anything; every match scored 4.6 or more), so the levels were redefined from the measured scores.
+- The cron parser and schedule-file validation moved into `@forge/context-store` so the app and the CLI share one implementation.
+- The `presets` and `endpoint` end-to-end tests type a mock key into the real credential store field and empty it afterwards; a real OpenAI key saved in the app would be cleared by running them.
+
 ### Strata
 - **Strata (local)** is a provider preset in the CLI (`--provider strata`, key from `STRATA_API_KEY`) and an Endpoint choice in Settings: `http://127.0.0.1:47831/v1`, model `swift-iq2_xs`. Checked against the running local Strata with its API key: `ask` returned an answer, and `run` completed a small edit with real tool calls (find, read, edit) and produced the correct diff (one model, `swift-iq2_xs`, one small task; the desktop app was not exercised against Strata). Without a key it returns Strata's own `401`. Tests confirm the Strata key goes only to Strata and an OpenAI key is never sent to it.
 
