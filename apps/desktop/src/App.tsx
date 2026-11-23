@@ -26,6 +26,8 @@ import { createWorkspaceServices, diskFs, git, norm, type ReportEvent, type Work
 import { languageForPath } from "./lib/uri";
 import { collectErrors } from "./lib/verifyDiagnostics";
 import { loadSettings, onSettingsChange } from "./lib/settings";
+import { Splitter } from "./components/Splitter";
+import { AGENT, EXPLORER, loadLayout, maxFor, saveLayout, type Layout } from "./lib/layout";
 import { loadApiKey } from "./lib/secrets";
 import { completeOnce, completeShort } from "./lib/agentSession";
 import { buildCompletionPrompt, cleanCompletion, shouldComplete } from "./lib/completion";
@@ -46,6 +48,22 @@ export function App() {
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [dark, setDark] = useState(true);
   const [agentOpen, setAgentOpen] = useState(true);
+  const [layout, setLayout] = useState<Layout>(() => loadLayout());
+  const [winW, setWinW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => saveLayout(layout), 250); // remembered once dragging settles, not on every pixel
+    return () => clearTimeout(t);
+  }, [layout]);
+  // The widths actually used: a smaller window squeezes the side panels before it squeezes the editor.
+  const explorerMax = maxFor(EXPLORER, winW, agentOpen ? layout.agent : 0);
+  const agentMax = maxFor(AGENT, winW, layout.explorer);
+  const explorerW = Math.min(layout.explorer, explorerMax);
+  const agentW = Math.min(layout.agent, agentMax);
   const [notice, setNotice] = useState<string | null>(null);
   const [inline, setInline] = useState<{ ctx: InlineContext; busy: boolean; done: string | null } | null>(null);
   const [cursor, setCursor] = useState<[number, number]>([1, 1]);
@@ -378,7 +396,7 @@ export function App() {
   return (
     <div className={`flex h-screen flex-col bg-[var(--bg)] text-[var(--fg)] ${dark ? "" : "light"}`} data-theme={dark ? "dark" : "light"}>
       <div className="flex min-h-0 flex-1">
-        <aside className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--panel)]">
+        <aside className="shrink-0 border-r border-[var(--border)] bg-[var(--panel)]" style={{ width: explorerW }} data-testid="explorer-pane">
           {root ? (
             <FileTree root={root} activePath={tabs.active} onOpen={(p) => void openFile(p)} />
           ) : (
@@ -390,6 +408,7 @@ export function App() {
             </div>
           )}
         </aside>
+        <Splitter label="Explorer width" width={explorerW} min={EXPLORER.min} max={explorerMax} grow={1} onChange={(w) => setLayout((l) => ({ ...l, explorer: w }))} onReset={() => setLayout((l) => ({ ...l, explorer: EXPLORER.def }))} testId="splitter-explorer" />
         <section className="flex min-w-0 flex-1 flex-col">
           <TabBar state={tabs} onActivate={(p) => dispatch({ type: "activate", path: p })} onClose={(p) => void closeTab(p)} />
           {notice && <div className="bg-red-900/40 px-3 py-1 text-sm" role="alert">{notice}</div>}
@@ -496,8 +515,9 @@ export function App() {
             </div>
           )}
         </section>
+        {agentOpen && <Splitter label="Agent panel width" width={agentW} min={AGENT.min} max={agentMax} grow={-1} onChange={(w) => setLayout((l) => ({ ...l, agent: w }))} onReset={() => setLayout((l) => ({ ...l, agent: AGENT.def }))} testId="splitter-agent" />}
         {agentOpen && (
-          <div className="flex min-h-0 flex-col" data-testid="agent-area">
+          <div className="flex min-h-0 shrink-0 flex-col" style={{ width: agentW }} data-testid="agent-area">
             <div className="flex items-center gap-1 border-b border-[var(--border)] bg-[var(--panel)] px-2 py-1 text-xs">
               <div role="tablist" aria-label="Agent threads" className="flex items-center gap-1">
                 {threads.map((t) => (

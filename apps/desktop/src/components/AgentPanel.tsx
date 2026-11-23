@@ -593,7 +593,7 @@ export function AgentPanel({ root, activePath, services, pendingCount, version, 
   const breakdown = [...byCategory].map(([k, v]) => `${k}: ${v.toLocaleString()}`).join("\n") + (meter ? `\n(${meter.calibrated ? "calibrated against the provider counts" : "estimate"})` : "");
 
   return (
-    <aside className="flex h-full w-96 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)]" aria-label="Agent panel" data-testid="agent-panel">
+    <aside className="flex h-full w-full min-w-0 flex-col border-l border-[var(--border)] bg-[var(--panel)]" aria-label="Agent panel" data-testid="agent-panel">
       <header className="flex flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-[var(--border)] px-2 py-1.5 text-sm" data-testid="agent-header">
         <strong className="sr-only">Agent</strong>
         <select
